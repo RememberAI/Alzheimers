@@ -4,48 +4,62 @@ import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Script from "next/script";
 
+/**
+ * This page has a 4-step flow:
+ *  0) Show Start button
+ *  1) Fade out button, fade in SiriWave
+ *  2) Slide SiriWave up, fade in black box
+ *  3) Fade out black box, slide SiriWave back down
+ *
+ * Steps automatically advance after some timeouts for demo purposes.
+ */
+
 export default function Home() {
-  const siriContainerRef = useRef(null);
+  // Step of the flow [0..3]. 0 = initial button, 3 = final animation.
+  const [step, setStep] = useState(0);
+
+  // Reference to the SiriWave container
+  const waveRef = useRef(null);
   const [siriWave, setSiriWave] = useState(null);
+
+  // For microphone error display
   const [micError, setMicError] = useState("");
 
-  // Loads SiriWave from unpkg as a global, so that `window.SiriWave` is defined
-  // before our React code tries to use it.
-  // In practice, you can also npm-install "siriwave" and import it directly,
-  // but here's the unpkg approach:
-  //
-  // <Script src="https://unpkg.com/siriwave/dist/siriwave.umd.min.js"
-  //         strategy="beforeInteractive" />
+  // For debugging or preventing repeated transitions
+  const [transitionHasStarted, setTransitionHasStarted] = useState(false);
 
+  // 1) Load SiriWave from unpkg; it attaches to window.SiriWave
+  //    We do "beforeInteractive" so it exists before React code runs.
+  //    (See <Script> near the bottom.)
+
+  // 2) Once the script is loaded and component is mounted, create SiriWave instance
   useEffect(() => {
-    // If the script hasn't loaded, window.SiriWave is undefined
     if (!window.SiriWave) {
-      console.warn("SiriWave script not yet loaded!");
+      console.warn("SiriWave script not loaded yet.");
       return;
     }
-    // Create wave instance one time only
-    if (!siriWave) {
-      const wave = new window.SiriWave({
-        container: siriContainerRef.current,
-        style: "ios9",
-        autostart: true,
-        amplitude: 0,  // we'll feed amplitude from mic
-        speed: 0.2,
-      });
-      setSiriWave(wave);
-    }
+    if (siriWave) return; // Only create once
+
+    // Create SiriWave
+    const wave = new window.SiriWave({
+      container: waveRef.current,
+      style: "ios9",
+      autostart: true,
+      amplitude: 0,
+      speed: 0.2,
+    });
+    setSiriWave(wave);
+
+    // Also auto-start the microphone – or you can wait for a user gesture
+    // For most browsers, a user-gesture is needed, so we try to resume if suspended
+    startMic(wave).catch((err) => console.error("Mic start error:", err));
   }, [siriWave]);
 
-  // We'll call this after a click, so that the AudioContext can auto-play
-  async function startMic() {
-    if (!siriWave) {
-      console.error("SiriWave not initialized yet.");
-      return;
-    }
+  // Microphone => update SiriWave amplitude
+  async function startMic(waveInstance) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      // Required in Chrome if not in a user gesture
       if (audioCtx.state === "suspended") {
         await audioCtx.resume();
       }
@@ -65,18 +79,87 @@ export default function Home() {
         }
         const average = Math.sqrt(sum / bufferLength);
 
-        // boost amplitude
+        // Scale up amplitude for clarity
         const scaledVolume = Math.min(average / 5, 30);
-        siriWave.setAmplitude(scaledVolume);
+        waveInstance.setAmplitude(scaledVolume);
 
         requestAnimationFrame(update);
       }
       update();
     } catch (err) {
-      console.error("Mic error", err);
-      setMicError(err.message || "Mic access denied.");
+      console.error("Mic access error:", err);
+      setMicError("Microphone access denied or not supported. " + err.message);
     }
   }
+
+  // Handle “Start Alzheimer’s Test” button click
+  const onStartTest = () => {
+    if (transitionHasStarted) return; // Prevent repeated clicks
+    setTransitionHasStarted(true);
+
+    // Move from step=0 to step=1 => fade out button, fade in wave
+    setStep(1);
+
+    // After a short delay, go to step=2 => wave slides up, black box appears
+    setTimeout(() => {
+      setStep(2);
+    }, 2000); // e.g. 2s after wave fades in
+
+    // Another delay to go to step=3 => black box fade out, wave slides down
+    setTimeout(() => {
+      setStep(3);
+    }, 4000); // 2 more seconds => total 4s from button click
+  };
+
+  // We use Tailwind classes (and/or inline styles) for transitions.
+  // We'll define conditional class strings for each element:
+
+  // Button classes
+  const buttonClasses = `
+    transition-all
+    duration-700
+    text-white
+    font-semibold
+    rounded-full
+    px-6
+    py-3
+    bg-[rgb(200,80,80)]   /* "darker red pastel" */
+    text-lg
+    ${step >= 1 ? "opacity-0 pointer-events-none" : "opacity-100"}
+  `;
+
+  // SiriWave container transitions:
+  // step=0 => invisible
+  // step=1 => fade in
+  // step=2 => also translate up
+  // step=3 => stays visible, but eventually slides down
+  // (We add in a .translate-y-[-100px] for sliding up, for example.)
+  const waveClasses = `
+    transition-all
+    duration-1000
+    w-[600px]
+    h-[300px]
+    bg-black
+    border
+    border-dashed
+    border-gray-600
+    ${step > 0 ? "opacity-100" : "opacity-0"}
+    ${step === 2 ? "-translate-y-24" : step === 3 ? "translate-y-0" : ""}
+    mx-auto
+  `;
+
+  // For demonstration, we’ll place the black box below wave.
+  // step=2 => it fades in
+  // step=3 => it fades out
+  const blackBoxClasses = `
+    transition-all
+    duration-1000
+    w-[200px]
+    h-[200px]
+    bg-black
+    mx-auto
+    ${step === 2 ? "opacity-100 mt-4" : "opacity-0 h-0 mt-0 pointer-events-none"}
+  `;
 
   return (
     <>
@@ -85,46 +168,30 @@ export default function Home() {
         strategy="beforeInteractive"
       />
 
-      <div className="min-h-screen p-8 pb-20 flex flex-col items-center">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
+      <div
+        className="min-h-screen flex flex-col items-center justify-center"
+        style={{
+          backgroundColor: "#FFF8DC", // cream background
+          transition: "background-color 0.5s",
+        }}
+      >
+        {/* Step 0: Button is visible; then fades out at Step 1 */}
+        <button onClick={onStartTest} className={buttonClasses}>
+          Start Alzheimer&apos;s Test
+        </button>
 
-        <div
-          ref={siriContainerRef}
-          style={{
-            width: 600,
-            height: 300,
-            border: "1px dashed #555",
-            background: "#000",
-            marginTop: 30,
-          }}
-        />
+        {/* Step 1..3: SiriWave container */}
+        <div ref={waveRef} className={waveClasses} style={{ marginTop: 40 }} />
 
+        {/* Step 2..3: black box below wave */}
+        <div className={blackBoxClasses} />
+
+        {/* Display microphone error if any */}
         {micError && (
-          <p style={{ color: "red", marginTop: 10 }}>
-            Microphone Error: {micError}
+          <p className="text-red-600 font-bold mt-4">
+            {micError}
           </p>
         )}
-
-        <button
-          onClick={startMic}
-          style={{
-            marginTop: 20,
-            padding: "8px 16px",
-            background: "#333",
-            color: "#fff",
-            border: "none",
-            cursor: "pointer",
-          }}
-        >
-          Start Microphone
-        </button>
       </div>
     </>
   );
