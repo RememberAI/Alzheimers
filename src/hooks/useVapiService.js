@@ -19,6 +19,13 @@ export const TranscriptType = {
   FINAL: 'final',
 };
 
+// Recording states
+export const RecordingState = {
+  INACTIVE: 'inactive',
+  ACTIVE: 'active',
+  PAUSED: 'paused',
+};
+
 /**
  * Hook to handle Vapi service integration with UI
  * @returns {Object} Service state and functions
@@ -26,6 +33,7 @@ export const TranscriptType = {
 export function useVapiService() {
   const [callStatus, setCallStatus] = useState(VapiCallStatus.INACTIVE);
   const [isSpeaking, setIsSpeaking] = useState(false); // Vapi speaking state
+  const [recordingState, setRecordingState] = useState(RecordingState.INACTIVE); // Added recording state
   const [transcript, setTranscript] = useState({ text: '', type: TranscriptType.FINAL });
   const [error, setError] = useState(null);
   const [averageVolumeLevel, setAverageVolumeLevel] = useState(0);
@@ -34,6 +42,9 @@ export function useVapiService() {
   const isStoppingRef = useRef(false); // To prevent race conditions on stop/end
 
   // Initialize Vapi on mount
+  // State for pre-speech transcript (what the assistant will say before speaking)
+  const [preSpeechTranscript, setPreSpeechTranscript] = useState('');
+  
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_VAPI_API_KEY;
     if (!apiKey) {
@@ -49,6 +60,7 @@ export function useVapiService() {
       vapiRef.current.on('call-start', () => {
         console.log('Vapi: call-start');
         setCallStatus(VapiCallStatus.CONNECTED);
+        setRecordingState(RecordingState.ACTIVE); // Set recording as active when call starts
         setError(null);
         isStoppingRef.current = false;
       });
@@ -59,6 +71,7 @@ export function useVapiService() {
           setCallStatus(VapiCallStatus.INACTIVE);
         }
         setIsSpeaking(false);
+        setRecordingState(RecordingState.INACTIVE); // Reset recording state on call end
         setTranscript({ text: '', type: TranscriptType.FINAL });
         setAverageVolumeLevel(0);
         setError(null); // Clear error on call end
@@ -68,21 +81,57 @@ export function useVapiService() {
       vapiRef.current.on('speech-start', () => {
         console.log('Vapi: speech-start');
         setIsSpeaking(true);
+        setRecordingState(RecordingState.PAUSED); // Pause recording while assistant is speaking
+        
+        // Use the pre-speech transcript as the initial transcript when speaking starts
+        if (preSpeechTranscript) {
+          setTranscript({ text: preSpeechTranscript, type: TranscriptType.PARTIAL });
+        }
       });
 
       vapiRef.current.on('speech-end', () => {
         console.log('Vapi: speech-end');
         setIsSpeaking(false);
-        // Optionally clear partial transcript here if desired
-        // setTranscript(prev => ({ ...prev, type: TranscriptType.FINAL }));
+        
+        // Ensure we're listening for user input after the assistant stops speaking
+        if (vapiRef.current && callStatus === VapiCallStatus.CONNECTED) {
+          // Resume listening after assistant finishes speaking
+          console.log('Resuming listening for user input');
+          setRecordingState(RecordingState.ACTIVE); // Activate recording after assistant stops speaking
+          
+          // Explicitly tell Vapi to resume listening if needed (the SDK may handle this automatically)
+          try {
+            // The SDK might have a method to explicitly resume recording
+            // Check SDK documentation for the exact method if needed
+            // For now, we're relying on the SDK to auto-resume listening
+          } catch (e) {
+            console.error('Error resuming recording:', e);
+          }
+        }
       });
 
       vapiRef.current.on('message', (message) => {
         // console.log('Vapi message:', message); // Can be noisy
         if (message.type === 'transcript') {
-          const { transcript: text, transcriptType } = message;
-          const type = transcriptType === 'final' ? TranscriptType.FINAL : TranscriptType.PARTIAL;
-          setTranscript({ text, type });
+          const { transcript: text, transcriptType, speaker } = message;
+          
+          // Only update transcript if it's from the assistant, not the user
+          if (speaker !== 'user') {
+            const type = transcriptType === 'final' ? TranscriptType.FINAL : TranscriptType.PARTIAL;
+            
+            // Store partial transcripts while the assistant is preparing to speak
+            if (!isSpeaking && type === TranscriptType.PARTIAL) {
+              setPreSpeechTranscript(text);
+            } 
+            // When the assistant is speaking, show the actual transcript
+            else if (isSpeaking) {
+              setTranscript({ text, type });
+            }
+            // When we get a final transcript and the assistant isn't speaking yet
+            else if (type === TranscriptType.FINAL && !isSpeaking) {
+              setPreSpeechTranscript(text);
+            }
+          }
         }
       });
 
@@ -96,6 +145,7 @@ export function useVapiService() {
         setError(e?.message || 'An unknown Vapi error occurred.');
         setCallStatus(VapiCallStatus.ERROR);
         setIsSpeaking(false);
+        setRecordingState(RecordingState.INACTIVE); // Set recording to inactive on error
         setAverageVolumeLevel(0);
       });
     }
@@ -179,7 +229,9 @@ export function useVapiService() {
   return {
     callStatus,
     isSpeaking,
+    recordingState, // Expose recording state
     transcript,
+    preSpeechTranscript, // Expose the pre-speech transcript
     error,
     averageVolumeLevel,
     toggleVapiCall, // Expose the simple toggle function

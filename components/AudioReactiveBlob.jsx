@@ -10,8 +10,8 @@ const sketch = (p) => {
   let currentVisualActivity = 0;
   const visualActivityLerpFactor = 0.08;
 
-  let smoothedVolumeLevel = 0; // Controlled by 'averageVolume' prop
-  const volumeLerpFactor = 0.15;
+  let smoothedVolumeLevel = 0; // Controlled by 'averageVolume' prop - now disabled
+  const volumeLerpFactor = 0; // Set to 0 to disable volume reactivity completely
 
   let isConnectingVisually = false; // Controlled by 'isConnecting' prop
   let connectionPulseTime = 0;
@@ -19,27 +19,28 @@ const sketch = (p) => {
 
   // --- Blob Geometry & Core Properties ---
   let baseRadius = 100;
-  const numVertices = 140;
+  const numVertices = 180; // More vertices for smoother circle
   let vertices = [];
 
   // --- Core "Breathing" & Idle Effects ---
   let idleNoiseTime = Math.random() * 1000;
-  const idleNoiseSpeed = 0.0006;
-  const idleNoiseScale = 0.6;
-  const idleDeformationAmount = 0.03;
+  const idleNoiseSpeed = 0.0005; // Slower movement
+  const idleNoiseScale = 0.3;    // Reduced noise scale for smoother shape
+  const idleDeformationAmount = 0.015; // Much smaller deformations for more circular shape
 
   // --- Active Animation Properties ---
   let activeNoiseTime = Math.random() * 2000;
-  const activeNoiseSpeed = 0.0012;
-  const activeNoiseScale = 1.5;
-  const activeDeformationBase = 0.05;
-  const volumeDeformationFactor = 0.15;
-
+  const activeNoiseSpeed = 0.0010;   // Slightly slower for smoother animation
+  const activeNoiseScale = 1.0;      // Smaller scale for less extreme distortion
+  const activeDeformationBase = 0.025; // Smaller base deformation for more circular shape
+  const volumeDeformationFactor = 0; // Disabled volume reaction completely
+  
+  // For gentle animation (voice reactivity disabled)
   let activeWavinessTime = Math.random() * 3000;
-  const activeWavinessSpeed = 0.0018;
-  const activeWavinessScale = 4.0;
-  const activeWavinessBaseAmount = 0.02;
-  const volumeWavinessFactor = 0.08;
+  const activeWavinessSpeed = 0.0015;  // Slightly slower
+  const activeWavinessScale = 2.0;     // Lower scale for smoother transitions
+  const activeWavinessBaseAmount = 0.015; // Smaller base amount
+  const volumeWavinessFactor = 0;   // Disabled volume-based waviness
 
   // --- Color Properties ---
   const activeHue = 210;
@@ -109,16 +110,30 @@ const sketch = (p) => {
     updateColor(timeDelta);
     calculateBlobShape(timeDelta);
     drawBlob();
-    drawMicrophoneIcon(); // Draw the icon
+    drawMicrophoneIcon(); // Draw the icon with recording indicator
 
     p.pop();
   };
 
   // --- Update Internal State ---
   const updateState = (timeDelta) => {
-    targetVisualActivity = isVisuallyActive ? 1.0 : 0.0;
+    // Simple state - just based on whether the assistant is speaking
+    targetVisualActivity = isVisuallyActive ? 0.6 : 0.3;
+    
+    // Disabled volume-based activity changes
+    
     currentVisualActivity = p.lerp(currentVisualActivity, targetVisualActivity, visualActivityLerpFactor * timeDelta);
-    // smoothedVolumeLevel is updated directly via p.updateVolume method
+    
+    // Fixed activity level for consistent appearance
+    // This ensures the shape stays circular and gently animated
+    if (currentVisualActivity < 0.3) {
+      currentVisualActivity = 0.3; // Base level activity for constant gentle motion
+    }
+    
+    // Cap the maximum visual activity
+    if (currentVisualActivity > 0.6) { // Lower cap for more consistency
+      currentVisualActivity = 0.6;
+    }
   };
 
   // --- Update Color ---
@@ -170,19 +185,26 @@ const sketch = (p) => {
       let radius = baseRadius + idleOffset;
 
       if (currentVisualActivity > 0.01) {
+        // Removed speech reactivity - replaced with gentle pulsing
+        // This creates a subtle circular pulsing that's not tied to audio
+        const gentlePulse = Math.sin(activeNoiseTime * 0.5) * 0.01 * baseRadius; // Very subtle constant pulse
+        
+        // Base noise-based deformation (reduced impact)
         const activeNoiseX = cosAngle * activeNoiseScale;
         const activeNoiseY = sinAngle * activeNoiseScale;
         const activeNoiseVal = p.noise(activeNoiseX, activeNoiseY, activeNoiseTime);
         const activeDeformationAmount = activeDeformationBase + smoothedVolumeLevel * volumeDeformationFactor;
         const activeOffset = p.map(activeNoiseVal, 0, 1, -activeDeformationAmount, activeDeformationAmount) * baseRadius;
 
+        // Smoother circular waviness (reduced impact)
         const wavinessNoiseX = cosAngle * activeWavinessScale;
         const wavinessNoiseY = sinAngle * activeWavinessScale;
         const wavinessNoiseVal = p.noise(wavinessNoiseX, wavinessNoiseY, activeWavinessTime);
         const wavinessAmount = activeWavinessBaseAmount + smoothedVolumeLevel * volumeWavinessFactor;
         const wavinessOffset = p.map(wavinessNoiseVal, 0, 1, -wavinessAmount, wavinessAmount) * baseRadius;
 
-        radius += (activeOffset + wavinessOffset) * currentVisualActivity;
+        // Combine all effects but limit their overall impact for a more circular shape
+        radius += ((activeOffset + wavinessOffset) * 0.6 + gentlePulse) * currentVisualActivity;
       }
 
       if (isConnectingVisually) {
@@ -191,8 +213,9 @@ const sketch = (p) => {
       }
 
 
-      const minRadiusClamp = baseRadius * 0.6;
-      const maxRadiusClamp = baseRadius * 1.4;
+      // Radius constraints - slightly relaxed to allow more voice reactivity
+      const minRadiusClamp = baseRadius * 0.8; // Allow slightly more concave areas for reactivity
+      const maxRadiusClamp = baseRadius * 1.2; // Allow slightly more bulging for reactivity
       radius = p.constrain(radius, minRadiusClamp, maxRadiusClamp);
 
       vertices[i].set(radius * cosAngle, radius * sinAngle);
@@ -228,16 +251,47 @@ const sketch = (p) => {
     // Base
     p.ellipse(0, (capsuleHeight / 2 - iconSize * 0.2) + standHeight, baseWidth, baseHeight);
 
+    // Always show a recording indicator to indicate the app is listening
+    const pulseTime = p.millis() * 0.003; // For pulsing effect
+    
+    // If actively recording (not while assistant is speaking), show pulsing red dot
+    if (isRecordingActive && !isVisuallyActive) {
+      const pulseAlpha = (p.sin(pulseTime) + 1) / 2 * 40 + 40; // Pulse between 40-80% opacity
+      p.fill(p.color(0, 80, 100, pulseAlpha)); // Red recording indicator
+      const indicatorSize = iconSize * 0.15;
+      p.circle(capsuleWidth * 0.5, -iconSize * 0.4, indicatorSize); // Position near top-right of mic
+    } 
+    // Otherwise show a steady indicator that we're still listening
+    else {
+      // Green dot (when connected but assistant is speaking or waiting)
+      const steadyAlpha = 60; // More subtle but visible
+      p.fill(p.color(120, 80, 80, steadyAlpha)); // Green indicator
+      const indicatorSize = iconSize * 0.12; // Slightly smaller
+      p.circle(capsuleWidth * 0.5, -iconSize * 0.4, indicatorSize); // Same position
+    }
+
     p.pop();
   };
 
   // --- Blob Rendering ---
   const drawBlob = () => {
-    const layers = 8;
+    const layers = 10; // More layers for smoother gradient
     const baseAlpha = 95;
     const alphaStep = (baseAlpha - 10) / layers; // Fade out more towards center
-    const radiusStepRatio = 0.03;
+    const radiusStepRatio = 0.025; // Smaller step ratio for smoother gradient
+    
+    // Add a subtle glow effect first
+    p.noFill();
+    p.stroke(p.color(currentHue, currentSaturation, currentBrightness, 5));
+    p.strokeWeight(baseRadius * 0.1);
+    p.beginShape();
+    for (let i = 0; i < numVertices; i++) {
+      p.vertex(vertices[i].x * 1.1, vertices[i].y * 1.1);
+    }
+    p.endShape(p.CLOSE);
+    p.noStroke();
 
+    // Draw the layers of the blob
     for (let layer = 0; layer < layers; layer++) {
       const layerRadiusRatio = 1.0 - (layer * radiusStepRatio);
       const layerAlpha = baseAlpha - layer * alphaStep;
@@ -273,10 +327,8 @@ const sketch = (p) => {
   };
 
   p.updateVolume = (volume) => {
-    if (typeof volume === 'number' && volume >= 0 && volume <= 1) {
-      // Apply smoothing to the volume level for visual stability
-      smoothedVolumeLevel = p.lerp(smoothedVolumeLevel, volume, volumeLerpFactor);
-    }
+    // Volume updates ignored - reactivity disabled
+    // smoothedVolumeLevel stays at 0
   };
 
   p.updateConnecting = (isConnecting) => {
@@ -285,6 +337,14 @@ const sketch = (p) => {
         connectionPulseTime = 0; // Reset pulse time
       }
       isConnectingVisually = isConnecting;
+    }
+  };
+  
+  // Track whether we're in recording mode
+  let isRecordingActive = false;
+  p.updateRecording = (isRecording) => {
+    if (typeof isRecording === 'boolean') {
+      isRecordingActive = isRecording;
     }
   };
 
@@ -307,7 +367,7 @@ const sketch = (p) => {
 };
 
 // --- React Component Definition ---
-const AudioReactivePaintBlob = ({ isActive, averageVolume = 0, isConnecting = false }) => {
+const AudioReactivePaintBlob = ({ isActive, averageVolume = 0, isConnecting = false, isRecording = false }) => {
   const canvasContainerRef = useRef(null);
   const p5InstanceRef = useRef(null);
   const [isLoading, setIsLoading] = useState(true); // Manage loading state
@@ -374,6 +434,13 @@ const AudioReactivePaintBlob = ({ isActive, averageVolume = 0, isConnecting = fa
       p5InstanceRef.current.updateConnecting(isConnecting);
     }
   }, [isConnecting]);
+  
+  // Add handler for isRecording prop
+  useEffect(() => {
+    if (p5InstanceRef.current?.updateRecording) {
+      p5InstanceRef.current.updateRecording(isRecording);
+    }
+  }, [isRecording]);
 
   return (
     // This container is specifically for the p5 canvas

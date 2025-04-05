@@ -66,7 +66,9 @@ export default function Home() {
   const {
     callStatus,
     isSpeaking,
+    recordingState,
     transcript,
+    preSpeechTranscript, // Get the pre-speech transcript
     error,
     averageVolumeLevel,
     toggleVapiCall // Use the simple toggle function
@@ -81,29 +83,39 @@ export default function Home() {
   // State for loading indicator during connection
   const [isLoading, setIsLoading] = useState(false); // Reintroduce for connecting phase
 
-  // Update displayed transcript when Vapi transcript changes
+  // Update displayed transcript when Vapi transcript or pre-speech transcript changes
   useEffect(() => {
-    // Show partial/final transcripts immediately
-    if (transcript.text) {
+    // If the AI is speaking, show the actual transcript
+    if (isSpeaking && transcript.text) {
       setDisplayedTranscript(transcript.text);
+    }
+    // Before the AI speaks, show the pre-speech transcript if available
+    else if (!isSpeaking && preSpeechTranscript && callStatus === VapiCallStatus.CONNECTED) {
+      setDisplayedTranscript(preSpeechTranscript);
     }
     // Clear transcript if call ends and text is empty (or on error)
     else if (callStatus === VapiCallStatus.INACTIVE || callStatus === VapiCallStatus.ERROR) {
       setDisplayedTranscript('');
     }
-  }, [transcript.text, transcript.type, callStatus]);
+  }, [transcript.text, transcript.type, preSpeechTranscript, isSpeaking, callStatus]);
 
   // Update loading state based on callStatus
   useEffect(() => {
     setIsLoading(callStatus === VapiCallStatus.CONNECTING);
   }, [callStatus]);
 
+  // Import RecordingState
+  const { RecordingState } = require('../src/hooks/useVapiService');
+
   // Get status text based on Vapi state
   const getStatusText = () => {
     switch (callStatus) {
       case VapiCallStatus.INACTIVE: return "Click the blue bubble to start";
       case VapiCallStatus.CONNECTING: return "Connecting...";
-      case VapiCallStatus.CONNECTED: return isSpeaking ? "Assistant is speaking..." : "Listening... Click bubble to stop";
+      case VapiCallStatus.CONNECTED: 
+        if (isSpeaking) return "Assistant is speaking...";
+        // Always emphasize that the user can speak
+        return "You can speak anytime. Click bubble to stop";
       case VapiCallStatus.ERROR: return error ? `Error: ${error.substring(0, 35)}...` : "Error - Click bubble to retry"; // Show short error
       default: return "Initializing...";
     }
@@ -116,6 +128,9 @@ export default function Home() {
     let opacity = 0.85;
     let filter = 'grayscale(40%)'; // More noticeable inactive state
     let cursor = 'pointer';
+    
+    // Default animation
+    let animation = 'none';
 
     switch (callStatus) {
       case VapiCallStatus.CONNECTING:
@@ -126,8 +141,17 @@ export default function Home() {
         cursor = 'wait'; // Indicate waiting
         break;
       case VapiCallStatus.CONNECTED:
-        borderColor = isSpeaking ? theme.palette.primary.light : theme.palette.success.main;
-        shadowColor = isSpeaking ? 'rgba(3, 169, 244, 0.3)' : 'rgba(46, 125, 50, 0.2)';
+        // Use green for connected state to indicate user can always speak
+        borderColor = theme.palette.success.main;
+        shadowColor = 'rgba(46, 125, 50, 0.3)';
+        
+        // Add subtle pulse when assistant is speaking
+        if (isSpeaking) {
+          animation = 'pulse 2.5s infinite';
+        } else {
+          animation = 'none';
+        }
+        
         opacity = 1;
         filter = 'none';
         cursor = 'pointer';
@@ -139,10 +163,12 @@ export default function Home() {
         break;
       case VapiCallStatus.INACTIVE:
       default:
-        // Defaults are grey
+        // Use blue for inactive state
+        borderColor = theme.palette.primary.light;
+        shadowColor = 'rgba(3, 169, 244, 0.2)';
         break;
     }
-    return { borderColor, shadowColor, opacity, filter, cursor };
+    return { borderColor, shadowColor, opacity, filter, cursor, animation };
   };
   const blobStyleProps = getBlobStyleProps();
 
@@ -238,6 +264,7 @@ export default function Home() {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               opacity: blobStyleProps.opacity, // Dynamic opacity
               filter: blobStyleProps.filter, // Dynamic filter
+              animation: blobStyleProps.animation, // Add animation property
               zIndex: 20, // Ensure clickable area is usable
               '&:focus': { outline: `3px solid ${theme.palette.primary.main}`, outlineOffset: '2px' },
               '&:hover': {
@@ -261,44 +288,34 @@ export default function Home() {
               isActive={isSpeaking} // Pass Vapi speaking state
               averageVolume={averageVolumeLevel} // Pass Vapi volume level
               isConnecting={callStatus === VapiCallStatus.CONNECTING} // Pass connecting state
+              isRecording={recordingState === RecordingState.ACTIVE && !isSpeaking} // Pass recording state
             />
             {/* Microphone Icon is now rendered inside AudioReactivePaintBlob */}
 
-            {/* Status indicators (like mic on/off text) are removed as status bar provides info */}
-
+            {/* Add a visual indicator that the mic is always listening */}
+          <Box sx={{
+            position: 'absolute',
+            bottom: '15px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            color: 'white',
+            padding: '3px 12px',
+            borderRadius: '10px',
+            fontSize: { xs: '0.75rem', sm: '0.8rem' },
+            fontWeight: 'bold',
+            opacity: callStatus === VapiCallStatus.CONNECTED ? 0.8 : 0,
+            transition: 'opacity 0.3s ease'
+          }}>
+            Always listening
+          </Box>
           </Box> {/* End clickable blob area */}
 
-          {/* "Click above..." Button (Text Logic Updated, Structure Unchanged) */}
-          <Box
-            sx={{
-              backgroundColor: 'rgba(0, 0, 0, 0.8)', color: 'white',
-              padding: { xs: '8px 16px', sm: '10px 20px', md: '12px 24px' },
-              borderRadius: '12px', fontWeight: 'bold', fontSize: { xs: '0.9rem', sm: '1.0rem', md: '1.1rem' },
-              maxWidth: 'fit-content', textAlign: 'center', transition: 'opacity 0.3s ease',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)', mt: 2,
-              opacity: callStatus === VapiCallStatus.CONNECTING ? 0.5 : 1, // Dim slightly when connecting
-              pointerEvents: callStatus === VapiCallStatus.CONNECTING ? 'none' : 'auto', // Disable clicks when connecting
-            }}
-          >
-            {/* Update text based on Vapi status */}
-            {callStatus === VapiCallStatus.INACTIVE ? 'Click above to start' :
-              callStatus === VapiCallStatus.ERROR ? 'Click above to retry' :
-                callStatus === VapiCallStatus.CONNECTING ? 'Connecting...' :
-                  'Click above to stop'}
-          </Box>
+          {/* "Click above..." Button removed as requested */}
 
         </Box> {/* End blob section */}
 
-        {/* Transcript Display (Logic Updated) */}
-        <Fade in={!!displayedTranscript && callStatus === VapiCallStatus.CONNECTED} timeout={700}>
-          <Box sx={{ display: callStatus === VapiCallStatus.CONNECTED ? 'block' : 'none' }}>
-            <Paper component="section" elevation={1} sx={{ /* styles */ p: { xs: 2, sm: 3, md: 4 }, mb: { xs: 3, sm: 4, md: 5 }, borderRadius: '16px', backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '1px solid rgba(0, 0, 0, 0.08)', minHeight: { xs: '80px', sm: '100px' }, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', zIndex: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }} role="region" aria-label="Assistant transcript" tabIndex={displayedTranscript ? 0 : -1}>
-              <Typography variant="body1" align="center" sx={{ fontStyle: 'italic', width: '100%', wordBreak: 'break-word', fontSize: { xs: '1rem', sm: '1.1rem', md: '1.2rem', lg: '1.25rem' }, lineHeight: 1.6, letterSpacing: { xs: '0.01em', md: '0.02em' }, color: transcript.type === 'partial' ? grey[600] : 'text.primary', transition: 'color 0.3s ease', }}>
-                "{displayedTranscript}"
-              </Typography>
-            </Paper>
-          </Box>
-        </Fade>
+        {/* Transcript display removed as requested */}
 
         {/* About Section (Unchanged) */}
         <Box component="section" sx={{ p: { xs: 2, sm: 3, md: 4 }, backgroundColor: 'rgba(224, 242, 254, 0.3)', borderRadius: '16px', mt: 'auto', position: 'relative', zIndex: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }} aria-labelledby="about-heading">
