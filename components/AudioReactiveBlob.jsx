@@ -203,6 +203,7 @@ const sketch = (p) => {
    * - Mimics natural mouth movements during speech
    */
   let activeWavinessNoiseTime = Math.random() * 4000; // Starting time offset
+  const baseActiveWavinessNoiseSpeed = 0.0006; // Speed of waviness animation
   let currentWavinessNoiseScale = 3.5; // Current waviness scale
   const baseWavinessNoiseScale = 3.5; // Base waviness scale
   const wavinessScalePitchFactor = 0.5; // Pitch influence amount
