@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
+  --background: #FFF8E1; /* Pastel cream background */
   --foreground: #171717;
+  --focus-color: #0288d1; /* Light blue for focus states */
+  --font-size-base: 16px;
+  --transition-speed: 0.3s;
 }
 
 @theme inline {
@@ -12,15 +15,63 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* Preserve light theme for all users including dark mode preference */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #FFF8E1; /* Keep cream background even in dark mode */
+    --foreground: #171717; /* Darker text for better readability on cream */
   }
+}
+
+html {
+  font-size: var(--font-size-base);
+  scroll-behavior: smooth;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  line-height: 1.6;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Accessibility Enhancements */
+:focus {
+  outline: 3px solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+  :root {
+    --font-size-base: 15px;
+  }
+}
+
+/* Better text contrast */
+* {
+  text-shadow: 0 0 1px rgba(0,0,0,0.01);
+}
+
+/* Remove tap highlight on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Improve transitions */
+button, a, [role="button"] {
+  transition: all var(--transition-speed) ease;
 }
