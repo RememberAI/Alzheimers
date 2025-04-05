@@ -803,40 +803,7 @@ const AudioReactivePaintBlob = ({ isActive }) => {
   }, [isActive]); // Only depend on isActive to prevent loops
   // Status indicators for accessibility and visual feedback
   const renderStatusIndicator = () => {
-    // Now using the isActive prop directly from parent component
-    // This ensures perfect sync with the parent's state
-    if (isActive) {
-      return (
-        <div aria-live="polite" 
-          style={{ 
-            position: 'absolute', 
-            top: 16, 
-            right: 16, 
-            backgroundColor: 'rgba(3, 169, 244, 0.8)',
-            color: 'white',
-            padding: '4px 8px',
-            borderRadius: '20px',
-            fontSize: '0.75rem',
-            fontWeight: 'bold',
-            zIndex: 5,
-            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}
-        >
-          <span style={{ 
-            width: '8px', 
-            height: '8px', 
-            backgroundColor: '#fff', 
-            borderRadius: '50%', 
-            display: 'inline-block',
-            animation: 'pulse 1.5s infinite ease-in-out'
-          }} />
-          Audio Visualization Active
-        </div>
-      );
-    }
+    // No visual indicator needed
     return null;
   };
 

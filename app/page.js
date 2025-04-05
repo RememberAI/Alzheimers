@@ -185,8 +185,8 @@ export default function Home() {
         maxWidth="md" 
         sx={{ 
           minHeight: '100vh',
-          py: { xs: 2, sm: 3 },
-          px: { xs: 2, sm: 3 },
+          py: { xs: 3, sm: 4, md: 5 },
+          px: { xs: 2, sm: 3, md: 4 },
           display: 'flex',
           flexDirection: 'column',
           gap: { xs: 2, sm: 3, md: 4 }
@@ -206,9 +206,10 @@ export default function Home() {
             variant="h1" 
             component="h1"
             sx={{
-              fontSize: { xs: '1.8rem', sm: '2rem', md: '2.2rem' },
+              fontSize: { xs: '1.8rem', sm: '2rem', md: '2.2rem', lg: '2.4rem' },
               lineHeight: 1.3,
-              fontWeight: 500
+              fontWeight: 500,
+              mb: { xs: 1, sm: 2, md: 2 }
             }}
             tabIndex={0}
           >
@@ -241,7 +242,7 @@ export default function Home() {
                 'error.main',
               position: 'relative',
               zIndex: 10,
-              fontSize: { xs: '1rem', sm: '1.1rem', md: '1.2rem' },
+              fontSize: { xs: '0.95rem', sm: '1.05rem', md: '1.15rem', lg: '1.2rem' },
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -482,30 +483,6 @@ export default function Home() {
               {microphoneState === 'on' ? 'Microphone ON' : 'Microphone OFF'}
             </Box>
             
-            {/* Status prompt displayed at center */}
-            <Box
-              sx={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                color: 'white',
-                padding: '12px 24px',
-                borderRadius: '12px',
-                fontWeight: 'bold',
-                fontSize: '1.1rem',
-                maxWidth: '80%',
-                textAlign: 'center',
-                zIndex: 5,
-                pointerEvents: 'none',
-                opacity: isActive ? 0 : 0.9,
-                transition: 'opacity 0.3s ease',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-              }}
-            >
-              {microphoneState === 'off' ? 'Click to start' : 'Click to stop'}
-            </Box>
           
             <Box sx={{
               position: 'absolute',
@@ -524,6 +501,25 @@ export default function Home() {
               />
             </Box>
           </Box>
+          
+          {/* "Click to start/stop" button now placed below the blob */}
+          <Box
+            sx={{
+              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              color: 'white',
+              padding: { xs: '8px 16px', sm: '10px 20px', md: '12px 24px' },
+              borderRadius: '12px',
+              fontWeight: 'bold',
+              fontSize: { xs: '0.9rem', sm: '1.0rem', md: '1.1rem' },
+              maxWidth: 'fit-content',
+              textAlign: 'center',
+              transition: 'opacity 0.3s ease',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              mt: 2
+            }}
+          >
+            {microphoneState === 'off' ? 'Click above to start' : 'Click above to stop'}
+          </Box>
         </Box>
         
         {/* Text display - completely separate from the blob */}
@@ -532,8 +528,8 @@ export default function Home() {
             component="section"
             elevation={1}
             sx={{ 
-              p: { xs: 2, sm: 3 },
-              mb: { xs: 3, sm: 4 },
+              p: { xs: 2, sm: 3, md: 4 },
+              mb: { xs: 3, sm: 4, md: 5 },
               borderRadius: '16px',
               backgroundColor: 'rgba(255, 255, 255, 0.95)',
               border: '1px solid rgba(0, 0, 0, 0.08)',
@@ -557,8 +553,9 @@ export default function Home() {
                 fontStyle: 'italic',
                 width: '100%',
                 wordBreak: 'break-word',
-                fontSize: { xs: '1.1rem', sm: '1.2rem' },
-                lineHeight: 1.6
+                fontSize: { xs: '1rem', sm: '1.1rem', md: '1.2rem', lg: '1.25rem' },
+                lineHeight: 1.6,
+                letterSpacing: { xs: '0.01em', md: '0.02em' }
               }}
             >
               "{currentText}"
@@ -570,7 +567,7 @@ export default function Home() {
         <Box 
           component="section"
           sx={{
-            p: { xs: 2, sm: 3 },
+            p: { xs: 2, sm: 3, md: 4 },
             backgroundColor: 'rgba(224, 242, 254, 0.3)',
             borderRadius: '16px',
             mt: 'auto',
@@ -586,7 +583,7 @@ export default function Home() {
             id="about-heading"
             gutterBottom
             sx={{
-              fontSize: { xs: '1.3rem', sm: '1.4rem', md: '1.5rem' },
+              fontSize: { xs: '1.25rem', sm: '1.35rem', md: '1.45rem', lg: '1.5rem' },
               fontWeight: 500,
               color: lightBlue[900]
             }}
@@ -598,7 +595,7 @@ export default function Home() {
             variant="body1" 
             paragraph
             sx={{
-              fontSize: { xs: '1.1rem', sm: '1.2rem' },
+              fontSize: { xs: '1rem', sm: '1.1rem', md: '1.2rem', lg: '1.25rem' },
               lineHeight: 1.6
             }}
           >
@@ -608,7 +605,7 @@ export default function Home() {
             variant="body1" 
             paragraph
             sx={{
-              fontSize: { xs: '1.1rem', sm: '1.2rem' },
+              fontSize: { xs: '1rem', sm: '1.1rem', md: '1.2rem', lg: '1.25rem' },
               lineHeight: 1.6
             }}
           >
@@ -619,10 +616,10 @@ export default function Home() {
             paragraph 
             sx={{ 
               fontWeight: 'bold',
-              fontSize: { xs: '1.1rem', sm: '1.2rem' },
+              fontSize: { xs: '1rem', sm: '1.1rem', md: '1.2rem', lg: '1.25rem' },
               lineHeight: 1.6,
               backgroundColor: 'rgba(255, 248, 225, 0.7)',
-              padding: 1.5,
+              padding: { xs: 1, sm: 1.5, md: 2 },
               borderRadius: 1,
               borderLeft: `4px solid ${theme.palette.warning.main}`,
               display: 'flex',
