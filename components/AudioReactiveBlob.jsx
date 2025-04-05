@@ -1,62 +1,132 @@
+/**
+ * AudioReactiveBlob.jsx
+ * 
+ * This component creates an interactive, audio-reactive visualization that responds
+ * to microphone input. The blob visualization changes shape, color, and behavior based
+ * on audio analysis, creating a visual representation of speech for the Alzheimer's
+ * assessment tool.
+ * 
+ * It uses p5.js for canvas-based animation and the Web Audio API for audio analysis.
+ * The component is designed to be accessible and visually calming for elderly users.
+ * 
+ * Key features:
+ * - Real-time audio processing using Web Audio API
+ * - Organic blob animation using Perlin noise
+ * - Audio frequency analysis for reactive visualization
+ * - Gentle color and motion changes optimized for elderly users
+ * - Microphone integration with permission handling
+ */
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Head from 'next/head';
 import { Box, Paper, ThemeProvider, createTheme, CssBaseline } from '@mui/material';
 import { grey, lightBlue } from '@mui/material/colors';
 
-// --- Material-UI Theme ---
+/**
+ * Material-UI Theme Configuration
+ * 
+ * Defines a custom theme with:
+ * - Light color mode for high readability
+ * - Calm blue color palette (soothing for elderly users)
+ * - Custom paper styling with rounded borders for a softer appearance
+ */
 const theme = createTheme({
   palette: { 
     mode: 'light', 
     background: { 
-      default: '#f8f8f8', 
-      paper: '#ffffff', 
+      default: '#f8f8f8', // Light grey background
+      paper: '#ffffff',   // White paper components
     }, 
     text: { 
-      primary: grey[900], 
-      secondary: grey[700], 
+      primary: grey[900],   // Dark text for high contrast
+      secondary: grey[700], // Slightly lighter secondary text
     }, 
     primary: {
-      main: lightBlue[700],
+      main: lightBlue[700], // Blue primary color (calming)
       light: lightBlue[500],
       dark: lightBlue[900],
     },
     error: { 
-      main: '#d32f2f', 
+      main: '#d32f2f', // Standard error color
     }, 
   },
   components: { 
     MuiPaper: { 
       styleOverrides: { 
         root: { 
-          borderRadius: '16px', 
-          boxShadow: '0 4px 12px rgba(0,0,0,0.08)', 
-          border: `1px solid ${grey[200]}`, 
-          position: 'relative', 
-          overflow: 'hidden', 
+          borderRadius: '16px',  // Rounded corners
+          boxShadow: '0 4px 12px rgba(0,0,0,0.08)', // Subtle shadow
+          border: `1px solid ${grey[200]}`, // Light border
+          position: 'relative',
+          overflow: 'hidden',
         } 
       } 
     } 
   },
 });
 
-// --- p5.js Sketch Definition ---
+/**
+ * p5.js Sketch Definition
+ * 
+ * This defines the p5.js sketch that creates the audio-reactive blob visualization.
+ * The sketch handles:
+ * - Audio input processing and analysis
+ * - Blob geometry calculation and animation
+ * - Visual effects based on audio characteristics
+ * - Rendering the blob with layers and depth
+ * 
+ * @param {Object} p - The p5.js instance
+ */
 const sketch = (p) => {
-  // --- Audio Analysis Setup ---
+  /**
+   * Audio Analysis Configuration
+   * 
+   * Setup for Web Audio API integration:
+   * - audioContext: Manages audio processing
+   * - analyser: Performs frequency analysis on audio input
+   * - microphone: Captures audio from the device mic
+   * - micStream: Raw media stream from getUserMedia
+   * - frequencyData: Array to store frequency domain data
+   */
   let audioContext; let analyser; let microphone; let micStream; let frequencyData;
-  let audioReady = false; let sampleRate = 44100;
-  const audioThreshold = 0.09;
-  const fftSize = 512;
-  let nyquist;
+  let audioReady = false; let sampleRate = 44100; // Default sample rate
+  const audioThreshold = 0.09; // Minimum audio level for reaction
+  const fftSize = 512; // FFT size (power of 2) for frequency analysis
+  let nyquist; // Will store the Nyquist frequency (half the sample rate)
 
-  // --- State Management (within p5) ---
+  /**
+   * Blob State Management
+   * 
+   * Controls the active/inactive state of the blob:
+   * - isP5StateActive: Whether the blob should react to audio
+   * - activeStateIntensity: Smoothly transitions between states (0-1)
+   * - activeStateLerpFactor: Controls the transition speed
+   */
   let isP5StateActive = false;
   let activeStateIntensity = 0; const activeStateLerpFactor = 0.07;
 
-  // --- Blob Geometry & Core Properties ---
+  /**
+   * Blob Geometry Configuration
+   * 
+   * Basic shape parameters:
+   * - baseRadius: Base size of the blob
+   * - numVertices: Number of points defining the blob's perimeter (higher = smoother)
+   * - vertices: Array of vertex positions
+   */
   let baseRadius = 100;
   const numVertices = 140; let vertices = [];
 
-  // --- Core "Breathing" & Pause Effects ---
+  /**
+   * Breathing and Pause Effects
+   * 
+   * Simulates natural breathing and pause behavior:
+   * - Creates gentle pulsing when idle
+   * - Responds to pauses in speech
+   * - Adds subtle "inhale" effect after pauses
+   * 
+   * These effects make the blob appear more organic and lifelike,
+   * especially during quiet periods, enhancing the feeling of
+   * interacting with something alive.
+   */
   let breathingTime = Math.random() * 500;
   const breathingSpeed = 0.0008; const breathingAmount = 0.025;
   let isBreathing = false; let silenceFrames = 0;
@@ -69,93 +139,245 @@ const sketch = (p) => {
   const inhaleSpeed = 0.15;
   const maxInhaleFactor = 0.08;
 
-  // --- Noise Parameters ---
-  // Passive - Gentle, slow-moving baseline effects
-  let passiveNoiseTime = Math.random() * 1000; const basePassiveNoiseSpeed = 0.0004; // Slower for calmer motion
-  const passiveNoisePosScale = 0.7;
-  let currentPassiveDeformationAmount = 0.04; // Very subtle deformation for stability
-  const basePassiveDeformationAmount = 0.04; // Very subtle deformation for stability
-  const maxPassiveDeformationBoost = 0.02; // Minimal boost for gentle response
-  const passiveDeformationLerpFactor = 0.008; // Slower transitions for smoother animation
+  /**
+   * Perlin Noise Parameters
+   * 
+   * These control the organic movement and deformation of the blob.
+   * All parameters are carefully tuned for gentle, predictable motion
+   * that's visually pleasing and non-distracting for elderly users.
+   */
+
+  /**
+   * Passive Noise (Idle State)
+   * 
+   * Creates gentle, slow baseline motion even when the blob is inactive:
+   * - Subtle deformations that make the blob feel alive but calm
+   * - Very slow speed to avoid distraction
+   * - Smooth transitions between states
+   */
+  let passiveNoiseTime = Math.random() * 1000; // Starting time offset
+  const basePassiveNoiseSpeed = 0.0004; // Slow speed for calm motion
+  const passiveNoisePosScale = 0.7; // Scale of noise position mapping
+  let currentPassiveDeformationAmount = 0.04; // Current deformation amount
+  const basePassiveDeformationAmount = 0.04; // Base deformation (very subtle)
+  const maxPassiveDeformationBoost = 0.02; // Maximum additional deformation
+  const passiveDeformationLerpFactor = 0.008; // Transition speed (slow)
   
-  // Active - Shape (core form) - very subtle, slow changes
-  let activeShapeNoiseTime = Math.random() * 2000; const baseActiveShapeNoiseSpeed = 0.0006; // Much slower for stability
-  const baseActiveShapeNoiseScale = 0.9; // Subtle shape variation
+  /**
+   * Active Shape Noise (Core Form)
+   * 
+   * Controls the overall shape morphing during speech:
+   * - Creates subtle, slow changes to the core blob shape
+   * - Maintains visual stability with minimal variation
+   * - Parameters optimized for calm, predictable motion
+   */
+  let activeShapeNoiseTime = Math.random() * 2000; // Starting time offset
+  const baseActiveShapeNoiseSpeed = 0.0006; // Very slow for stability
+  const baseActiveShapeNoiseScale = 0.9; // Subtle shape variation scale
   let currentActiveShapeNoiseScale = baseActiveShapeNoiseScale;
-  const shapeScaleLerpFactor = 0.008; // Slower transitions
-  const shapeScaleSpreadFactor = 0.08; // Minimal variation
+  const shapeScaleLerpFactor = 0.008; // Slow transition between states
+  const shapeScaleSpreadFactor = 0.08; // Minimal variation amount
   
-  // Active - Texture (fine details) - very subtle
-  let activeTextureNoiseTime = Math.random() * 3000; const baseActiveTextureNoiseSpeed = 0.0010; // Slower for stability
-  const activeTextureNoiseScale = 8.0; let currentActiveTextureIntensity = 0.04; // Very subtle texture
-  const baseTextureIntensity = 0.02; const maxTextureIntensity = 0.08; // Limited intensity
-  const textureIntensityLerpFactor = 0.012; // Slower transitions
+  /**
+   * Active Texture Noise (Fine Details)
+   * 
+   * Adds subtle surface details to the blob:
+   * - Very fine, small-scale texture variations
+   * - Limited intensity to prevent visual distraction
+   * - Slower transitions for elderly-friendly visuals
+   */
+  let activeTextureNoiseTime = Math.random() * 3000; // Starting time offset
+  const baseActiveTextureNoiseSpeed = 0.0010; // Slow speed for stability
+  const activeTextureNoiseScale = 8.0; // High frequency for fine details
+  let currentActiveTextureIntensity = 0.04; // Current texture intensity
+  const baseTextureIntensity = 0.02; // Minimum texture intensity
+  const maxTextureIntensity = 0.08; // Maximum texture intensity
+  const textureIntensityLerpFactor = 0.012; // Slow transition speed
   
-  // Active - Waviness (speaking motion) - gentle, controlled response
-  let activeWavinessNoiseTime = Math.random() * 4000; const baseActiveWavinessNoiseSpeed = 0.0006; // Slower for stability
-  let currentWavinessNoiseScale = 3.5; // Lower scale for smoother shapes
-  const baseWavinessNoiseScale = 3.5; // Lower scale for smoother shapes
-  const wavinessScalePitchFactor = 0.5; // Reduced pitch influence for consistency
-  const wavinessScaleLerpFactor = 0.01; // Very slow transitions for elderly-friendly visuals
-  let currentWavinessInfluence = 0.0;
+  /**
+   * Active Waviness (Speech Motion)
+   * 
+   * Creates the appearance of speech through gentle wave-like motion:
+   * - Responds to audio level and frequency content
+   * - Gentle, controlled response optimized for elderly users
+   * - Mimics natural mouth movements during speech
+   */
+  let activeWavinessNoiseTime = Math.random() * 4000; // Starting time offset
+  let currentWavinessNoiseScale = 3.5; // Current waviness scale
+  const baseWavinessNoiseScale = 3.5; // Base waviness scale
+  const wavinessScalePitchFactor = 0.5; // Pitch influence amount
+  const wavinessScaleLerpFactor = 0.01; // Very slow transitions
+  let currentWavinessInfluence = 0.0; // Current waviness influence
   const maxWavinessInfluence = 0.15; // Limited influence for controlled movement
-  const wavinessInfluenceLerpFactor = 0.012; // Slower transitions
-  // Active - Angular Offset
-  let activeNoiseAngularOffset = Math.random() * p.TWO_PI;
-  const baseActiveNoiseOffsetSpeed = 0.0003;
+  const wavinessInfluenceLerpFactor = 0.012; // Slow transition speed
+  
+  /**
+   * Angular Offset
+   * 
+   * Controls rotation of noise patterns:
+   * - Creates variation in the appearance over time
+   * - Prevents the blob from looking too static
+   * - Very slow movement for stability
+   */
+  let activeNoiseAngularOffset = Math.random() * p.TWO_PI; // Random starting angle
+  const baseActiveNoiseOffsetSpeed = 0.0003; // Very slow rotation
 
-  // --- Speed Modulation by Volume --- (slower, more deliberate for CSM speaking style)
-  const maxSlowSpeedMultiplier = 1.8; // Much lower for calmer motion
-  const maxFastSpeedMultiplier = 1.4; // Much lower for calmer motion
+  /**
+   * Speed Modulation Parameters
+   * 
+   * Controls how quickly the blob animates based on audio volume:
+   * - Lower multipliers create calmer, more deliberate motion
+   * - Optimized for a calm, soothing speaking style
+   * - Prevents rapid, jarring movements that might be distracting
+   */
+  const maxSlowSpeedMultiplier = 1.8; // Maximum slow motion speed factor
+  const maxFastSpeedMultiplier = 1.4; // Maximum fast motion speed factor
 
-  // Peak extension control - gentle, smooth response
-  let activePeakMultiplier = 1.0; const activeMultiplierLerpFactor = 0.08; // Slower transitions
-  const maxPeakExtensionFactor = 1.1; // Very limited extension for stability
+  /**
+   * Peak Extension Control
+   * 
+   * Manages how much the blob can extend or spike outward:
+   * - Creates gentle, smooth responses to audio
+   * - Very limited extension factor for visual stability
+   * - Slow transitions to prevent sudden shape changes
+   */
+  let activePeakMultiplier = 1.0; // Current peak extension multiplier
+  const activeMultiplierLerpFactor = 0.08; // Slow transition rate
+  const maxPeakExtensionFactor = 1.1; // Very limited maximum extension
 
-  // --- Internal Complexity Texture ---
-  let internalTextureTime = Math.random() * 6000; const internalTextureSpeed = 0.0003;
-  const internalTextureScale = 0.5; const internalTextureComplexityScale = 2.5;
-  let internalTextureAlpha = 0; const maxInternalTextureAlpha = 18;
-  const internalAlphaLerpFactor = 0.015;
+  /**
+   * Internal Complexity Texture
+   * 
+   * Creates subtle internal texture within the blob:
+   * - Adds visual depth and complexity
+   * - Very slow movement for stability
+   * - Opacity controlled by audio characteristics
+   */
+  let internalTextureTime = Math.random() * 6000; // Starting time offset
+  const internalTextureSpeed = 0.0003; // Very slow movement
+  const internalTextureScale = 0.5; // Base texture scale
+  const internalTextureComplexityScale = 2.5; // Higher frequency detail scale
+  let internalTextureAlpha = 0; // Current opacity (0-100)
+  const maxInternalTextureAlpha = 18; // Maximum opacity
+  const internalAlphaLerpFactor = 0.015; // Slow fade in/out
 
-  // --- Edge Sharpness / Certainty Proxy ---
-  let edgeSharpness = 1.0; const edgeSharpnessLerpFactor = 0.015;
+  /**
+   * Edge Sharpness Control
+   * 
+   * Manages the definition of the blob's edge:
+   * - Proxy for "certainty" in speech
+   * - More defined edges during clear speech
+   * - Softer edges during uncertain or quiet moments
+   */
+  let edgeSharpness = 1.0; // Current edge sharpness
+  const edgeSharpnessLerpFactor = 0.015; // Slow transition rate
 
-  // --- Inferred Speech Mode Factors ---
+  /**
+   * Speech Mode Factors
+   * 
+   * Infers speech characteristics to adjust blob behavior:
+   * - focusFactor: Represents concentration/clarity
+   * - melodyFactor: Represents tonal variation/singing quality
+   * - emphasisFactor: Represents emphasis/excitement
+   * 
+   * These factors are derived from audio analysis and influence
+   * various aspects of the blob's animation and appearance.
+   */
   let focusFactor = 0.0; const focusFactorLerp = 0.02;
   let melodyFactor = 0.0; const melodyFactorLerp = 0.025;
   let emphasisFactor = 0.0; const emphasisFactorLerp = 0.05;
 
-  // --- Audio Reactivity Parameters ---
-  let smoothedOverallLevel = 0; let smoothedMidLevel = 0; let smoothedTrebleLevel = 0;
-  const audioLerpFactor = 0.1;
-  let frequencySpread = 0; const freqSpreadLerpFactor = 0.03;
-  const binActivationThreshold = 10;
-  let pitchProxy = 0.5; const pitchProxyLerpFactor = 0.06;
-  let lastPitchProxy = 0.5;
-  let pitchChangeRate = 0; const pitchChangeLerpFactor = 0.05;
-  const pitchMinFreq = 80; const pitchMaxFreq = 500;
-  let pitchMinIndex, pitchMaxIndex;
-  let midHistory = []; const midHistoryLength = 30;
-  let sustainedMidLevel = 0;
+  /**
+   * Audio Reactivity Parameters
+   * 
+   * Core audio analysis values that drive the visualization:
+   * - Smoothed audio levels across frequency bands
+   * - Frequency spread and distribution analysis
+   * - Pitch detection and tracking
+   * - History tracking for sustained patterns
+   * 
+   * These parameters extract meaningful characteristics from 
+   * the audio input to create appropriate visual responses.
+   */
+  let smoothedOverallLevel = 0; // Overall audio level (0-1)
+  let smoothedMidLevel = 0;     // Mid frequency level (0-1)
+  let smoothedTrebleLevel = 0;  // High frequency level (0-1)
+  const audioLerpFactor = 0.1;  // Smoothing factor for audio levels
+  let frequencySpread = 0;      // How spread out the frequencies are
+  const freqSpreadLerpFactor = 0.03; // Smoothing for frequency spread
+  const binActivationThreshold = 10;  // Minimum bin value to count as active
+  let pitchProxy = 0.5;         // Estimated pitch value (0-1)
+  const pitchProxyLerpFactor = 0.06; // Smoothing for pitch changes
+  let lastPitchProxy = 0.5;     // Previous pitch value
+  let pitchChangeRate = 0;      // How quickly pitch is changing
+  const pitchChangeLerpFactor = 0.05; // Smoothing for pitch change rate
+  const pitchMinFreq = 80;      // Minimum tracked frequency (Hz)
+  const pitchMaxFreq = 500;     // Maximum tracked frequency (Hz)
+  let pitchMinIndex, pitchMaxIndex; // FFT bin indices for pitch range
+  let midHistory = [];          // History of mid-frequency levels
+  const midHistoryLength = 30;  // Length of history buffer
+  let sustainedMidLevel = 0;    // Average mid level over time
 
-  // --- Volume Dynamics (Aha! detection) ---
-  let volumeHistory = []; const volumeHistoryLength = 60;
-  let averageVolume = 0; const ahaThresholdMultiplier = 1.4;
-  const ahaMinimumLevel = 0.30; let isAhaMoment = false;
-  let ahaTimer = 0; const ahaDuration = 15;
+  /**
+   * Volume Dynamics Detection
+   * 
+   * Analyzes volume patterns to detect significant moments:
+   * - Tracks volume history to establish baselines
+   * - Detects "Aha!" moments (sudden volume increases)
+   * - Creates special visual effects for these moments
+   * 
+   * This adds a layer of emotional intelligence to the visualization,
+   * responding appropriately to significant audio events.
+   */
+  let volumeHistory = [];       // History of volume levels
+  const volumeHistoryLength = 60; // Length of history buffer
+  let averageVolume = 0;        // Running average volume
+  const ahaThresholdMultiplier = 1.4; // Volume spike detection threshold
+  const ahaMinimumLevel = 0.30; // Minimum level for "Aha!" detection
+  let isAhaMoment = false;      // Currently in an "Aha!" moment
+  let ahaTimer = 0;             // Timer for "Aha!" effect duration
+  const ahaDuration = 15;       // How long "Aha!" effects last
 
-  // --- Color Properties --- (calm, soothing colors for elderly audience)
-  const baseHue = 210; let hueShiftRange = 15; // Blue is calming, less shift for stability
-  let targetHue = baseHue; let currentHue = baseHue; const hueLerpFactor = 0.01; // Slower color transitions
-  const baseSaturation = 60; const baseBrightness = 95; // Slightly less saturated, gentle colors
-  let saturationBoost = 0; const maxSaturationBoost = 10; // Limited saturation change
-  let brightnessBoost = 0; const maxBrightnessBoost = 2; // Very subtle brightness changes
-  let currentCenterColor; let currentEdgeColor; // Assigned in updateColor
-  let flashIntensity = 0; const flashDecay = 0.10; // Slower decay for gentler transitions
+  /**
+   * Color Properties
+   * 
+   * Controls the blob's color scheme:
+   * - Base blue color (calming for elderly audience)
+   * - Limited color shifts for visual stability
+   * - Gentle saturation and brightness changes
+   * - Subtle flash effects for emphasis
+   * 
+   * Colors are carefully chosen to be soothing and accessible,
+   * with minimal jarring changes.
+   */
+  const baseHue = 210;          // Base color hue (blue)
+  let hueShiftRange = 15;       // Limited hue variation
+  let targetHue = baseHue;      // Target hue to transition toward
+  let currentHue = baseHue;     // Current hue value
+  const hueLerpFactor = 0.01;   // Very slow color transitions
+  const baseSaturation = 60;    // Moderate saturation (not too vivid)
+  const baseBrightness = 95;    // High brightness for visibility
+  let saturationBoost = 0;      // Current saturation boost
+  const maxSaturationBoost = 10; // Limited saturation change
+  let brightnessBoost = 0;      // Current brightness boost
+  const maxBrightnessBoost = 2; // Very subtle brightness changes
+  let currentCenterColor;       // Current blob center color
+  let currentEdgeColor;         // Current blob edge color
+  let flashIntensity = 0;       // Current flash effect intensity
+  const flashDecay = 0.10;      // Slow decay for gentle transitions
 
-  // --- p5.js Setup ---
+  /**
+   * p5.js Setup Function
+   * 
+   * Initializes the canvas and sets up all required components:
+   * - Creates and positions the canvas in the container
+   * - Sets up color and angle modes
+   * - Calculates initial dimensions and parameters
+   * - Initializes all arrays and state variables
+   * - Performs initial calculations for blob appearance
+   */
   p.setup = () => {
+    // Find the container element where the canvas will be placed
     const container = document.getElementById('canvas-container'); 
     if (!container) {
       console.error("Canvas container not found");
@@ -166,7 +388,7 @@ const sketch = (p) => {
     const canvasWidth = Math.floor(container.offsetWidth);
     const canvasHeight = Math.floor(container.offsetHeight);
     
-    // Create and position the canvas
+    // Create and position the canvas inside the container
     const canvas = p.createCanvas(canvasWidth, canvasHeight);
     canvas.parent('canvas-container');
     
@@ -183,20 +405,26 @@ const sketch = (p) => {
       canvasElement.style.left = '0';
     }
     
-    p.colorMode(p.HSB, 360, 100, 100, 100); 
-    p.angleMode(p.RADIANS); 
-    p.frameRate(60);
+    // Set up color and angle modes
+    p.colorMode(p.HSB, 360, 100, 100, 100); // HSB color mode with alpha
+    p.angleMode(p.RADIANS); // Use radians for angle calculations
+    p.frameRate(60); // Target 60fps for smooth animation
     
-    baseRadius = p.min(p.width, p.height) / 5.0;
-    nyquist = sampleRate / 2;
-    const binWidth = nyquist / (fftSize / 2);
+    // Calculate dimensions and audio parameters
+    baseRadius = p.min(p.width, p.height) / 5.0; // Responsive sizing based on canvas
+    nyquist = sampleRate / 2; // Nyquist frequency (highest detectable frequency)
+    const binWidth = nyquist / (fftSize / 2); // Width of each frequency bin
+    
+    // Calculate FFT bin indices for pitch tracking range
     pitchMinIndex = Math.max(1, Math.floor(pitchMinFreq / binWidth));
     pitchMaxIndex = Math.min(fftSize / 2 - 1, Math.ceil(pitchMaxFreq / binWidth));
     
-    // Initialize vertices and history arrays
+    // Initialize vertices array for the blob's shape
     for (let i = 0; i < numVertices; i++) { 
       vertices.push(p.createVector(0, 0)); 
     }
+    
+    // Initialize history arrays with zeros
     for(let i=0; i<volumeHistoryLength; i++) volumeHistory.push(0);
     for(let i=0; i<midHistoryLength; i++) midHistory.push(0);
     
@@ -205,9 +433,9 @@ const sketch = (p) => {
     currentPassiveDeformationAmount = basePassiveDeformationAmount;
     currentWavinessNoiseScale = baseWavinessNoiseScale;
     
-    // Initial calculations
-    updateColor(); 
-    calculateBlobShape(); 
+    // Perform initial calculations for blob appearance
+    updateColor(); // Calculate initial colors
+    calculateBlobShape(); // Calculate initial shape
     
     // Force a complete redraw once on setup
     p.clear();
@@ -216,104 +444,290 @@ const sketch = (p) => {
     console.log(`p5 Setup Complete. Canvas: ${p.width}x${p.height}, BaseRadius: ${baseRadius}, Pitch Range Indices: ${pitchMinIndex}-${pitchMaxIndex}`);
   };
 
-  // --- p5.js Draw Loop ---
+  /**
+   * p5.js Draw Loop
+   * 
+   * Main animation loop that runs continuously:
+   * - Calculates time delta for frame-rate independent animation
+   * - Clears and resets the canvas
+   * - Centers all drawing operations
+   * - Updates audio analysis data
+   * - Updates motion, color, and shape parameters
+   * - Renders all visual elements in the correct order
+   * 
+   * This function runs once per frame (ideally 60 times per second).
+   */
   p.draw = () => {
-    let timeDelta = p.deltaTime / (1000 / 60);
+    // Calculate time delta for consistent animation speed regardless of frame rate
+    let timeDelta = p.deltaTime / (1000 / 60); // Normalize to 60fps
     
     // Clear the entire canvas with background color to prevent artifacts
     p.clear();
     p.background(p.color(theme.palette.background.default));
     
     // Ensure everything is perfectly centered
-    p.push();
+    p.push(); // Save the current transformation state
+    
     // Use integer values to avoid sub-pixel rendering issues
     const centerX = Math.floor(p.width / 2);
     const centerY = Math.floor(p.height / 2);
-    p.translate(centerX, centerY);
+    p.translate(centerX, centerY); // Center the coordinate system
     
-    updateAudio();
-    updateStateAndMotion(timeDelta);
-    updateColor();
-    calculateBlobShape();
-    drawInternalTexture();
-    drawBlob();
-    drawMicrophoneIcon();
-    if(pauseEffectTimer > 0) drawPauseEffect();
+    // Update all calculations in sequence
+    updateAudio(); // Process audio input data
+    updateStateAndMotion(timeDelta); // Update motion parameters
+    updateColor(); // Update color parameters
+    calculateBlobShape(); // Calculate the blob vertices
     
-    p.pop();
+    // Draw all visual elements in the correct order (back to front)
+    drawInternalTexture(); // Draw internal texture details
+    drawBlob(); // Draw the main blob shape
+    drawMicrophoneIcon(); // Draw the microphone icon
+    if(pauseEffectTimer > 0) drawPauseEffect(); // Draw pause ripple effect if active
+    
+    p.pop(); // Restore the original transformation state
   };
   
-  // --- Draw Microphone Icon ---
+  /**
+   * Draw Microphone Icon
+   * 
+   * Renders a microphone icon at the center of the blob:
+   * - Icon scales and animates based on audio level
+   * - Provides a visual cue that this is an audio interface
+   * - Simple, recognizable design with high contrast
+   * - Includes a pulsing circle indicator around the microphone
+   */
   const drawMicrophoneIcon = () => {
-    // Use the same scaling factor for all elements to keep them in sync
-    // Ensure the scaling factor can never become negative
+    // Calculate scaling factor based on audio level
+    // Uses safety checks to prevent negative or invalid values
     const smoothedLevel = Math.max(0, smoothedOverallLevel); // Prevent negative audio levels
     const peakMult = Math.max(0, activePeakMultiplier); // Prevent negative multipliers
-    const scaleFactor = 1 + smoothedLevel * peakMult * 0.6;
+    const scaleFactor = 1 + smoothedLevel * peakMult * 0.6; // Audio-driven scaling
     
-    // Draw scaling circle around microphone - MUCH larger now
-    const minCircleRadius = Math.max(0.1, baseRadius * 0.75); // Close to blob border
-    const maxCircleRadius = Math.max(minCircleRadius + 0.1, baseRadius * 0.92); // Almost touching the blob
-    // Ensure level is between 0-1 for lerp
-    const safeLevel = p.constrain(smoothedLevel, 0, 1);
-    const circleRadius = p.lerp(minCircleRadius, maxCircleRadius, safeLevel);
-    p.push();
-    p.noFill();
-    p.stroke(255);
+    // Draw a pulsing circle around the microphone 
+    // This creates a visual indicator of active speech
+    const minCircleRadius = Math.max(0.1, baseRadius * 0.75); // Minimum radius
+    const maxCircleRadius = Math.max(minCircleRadius + 0.1, baseRadius * 0.92); // Maximum radius
+    const safeLevel = p.constrain(smoothedLevel, 0, 1); // Ensure level is between 0-1
+    const circleRadius = p.lerp(minCircleRadius, maxCircleRadius, safeLevel); // Interpolate radius
+    
+    p.push(); // Save drawing state
+    p.noFill(); // Transparent center
+    p.stroke(255); // White circle
     p.strokeWeight(2); // Slightly thicker for better visibility
-    p.circle(0, 0, circleRadius * 2);
-    p.pop();
+    p.circle(0, 0, circleRadius * 2); // Draw the circle
+    p.pop(); // Restore drawing state
     
-    // Draw a simple, iconic podcast microphone
-    p.push();
-    p.fill(255);
-    p.noStroke();
+    // Draw the microphone icon
+    p.push(); // Save drawing state
+    p.fill(255); // White fill
+    p.noStroke(); // No outline
     
-    // Base size for microphone that scales with audio
-    const baseMicSize = Math.max(0.1, baseRadius * 0.28); // Ensure base size is never too small
-    // Ensure scaleFactor is always positive (at least 0.1) to prevent negative dimensions
-    const safeScaleFactor = Math.max(0.1, scaleFactor); 
-    const currentMicSize = baseMicSize * safeScaleFactor;
+    // Calculate microphone size based on audio level
+    const baseMicSize = Math.max(0.1, baseRadius * 0.28); // Base size that scales with blob
+    const safeScaleFactor = Math.max(0.1, scaleFactor); // Ensure scale factor is positive
+    const currentMicSize = baseMicSize * safeScaleFactor; // Apply scaling
     
-    // Simple classic microphone - just the essential elements
+    // Draw the main microphone head (rounded rectangle)
+    p.rectMode(p.CENTER); // Center-based rectangle mode
+    const cornerRadius = Math.max(0.001, currentMicSize * 0.2); // Safe positive corner radius
+    p.rect(0, -currentMicSize * 0.3, // Position slightly above center
+          currentMicSize * 0.55, currentMicSize * 0.8, // Width and height
+          cornerRadius); // Rounded corners
     
-    // Main mic head - simple rounded rectangle
-    p.rectMode(p.CENTER);
-    // Ensure the corner radius is always positive
-    const cornerRadius = Math.max(0.001, currentMicSize * 0.2);
-    p.rect(0, -currentMicSize * 0.3, currentMicSize * 0.55, currentMicSize * 0.8, cornerRadius);
+    // Draw the microphone stand (thin rectangle)
+    p.rect(0, currentMicSize * 0.5, // Position below the head
+          Math.max(0.001, currentMicSize * 0.12), // Width (with safety check)
+          Math.max(0.001, currentMicSize * 1.0)); // Height (with safety check)
     
-    // Simple mic stand - no corner radius to avoid errors
-    p.rect(0, currentMicSize * 0.5, Math.max(0.001, currentMicSize * 0.12), Math.max(0.001, currentMicSize * 1.0));
+    // Draw the base of the microphone (ellipse)
+    p.ellipse(0, currentMicSize * 1.0, // Position at bottom of stand
+             Math.max(0.001, currentMicSize * 0.7), // Width
+             Math.max(0.001, currentMicSize * 0.18)); // Height
     
-    // Base - ellipse doesn't need radius protection as p5.js handles it
-    p.ellipse(0, currentMicSize * 1.0, Math.max(0.001, currentMicSize * 0.7), Math.max(0.001, currentMicSize * 0.18));
-    
-    // Mic grille pattern - subtle circles 
-    p.fill(0, 0, 0, 30); // Semitransparent dark
-    
-    // Three small circles to suggest mic grille
+    // Draw microphone grille pattern (subtle dots)
+    p.fill(0, 0, 0, 30); // Semi-transparent dark color
     const grilleDiameter = Math.max(0.001, currentMicSize * 0.12);
     
     // Only draw grille details if microphone is large enough to avoid artifacts
     if (currentMicSize > 0.1) {
+      // Top row of grille dots
       p.ellipse(-currentMicSize * 0.15, -currentMicSize * 0.4, grilleDiameter);
       p.ellipse(0, -currentMicSize * 0.4, grilleDiameter);
       p.ellipse(currentMicSize * 0.15, -currentMicSize * 0.4, grilleDiameter);
       
+      // Bottom row of grille dots
       p.ellipse(-currentMicSize * 0.15, -currentMicSize * 0.2, grilleDiameter);
       p.ellipse(0, -currentMicSize * 0.2, grilleDiameter);
       p.ellipse(currentMicSize * 0.15, -currentMicSize * 0.2, grilleDiameter);
     }
     
-    p.pop();
+    p.pop(); // Restore drawing state
   };
 
-  // --- Audio Setup Function ---
-  const setupAudio = async () => { if (audioContext && audioContext.state === 'running') { if (!micStream || !micStream.active) { try { micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); if (microphone) microphone.disconnect(); microphone = audioContext.createMediaStreamSource(micStream); microphone.connect(analyser); console.log("Reconnected mic stream."); } catch (err) { console.error("Error reconnecting mic:", err); audioReady = false; isP5StateActive = false; return false; } } audioReady = true; console.log("Audio already running or reconnected."); return true; } if (audioContext && audioContext.state !== 'closed') { console.log("Closing existing audio context before creating new one."); await audioContext.close().catch(e => console.error("Error closing previous context:", e)); audioContext = null; } try { audioContext = new (window.AudioContext || window.webkitAudioContext)(); sampleRate = audioContext.sampleRate; nyquist = sampleRate / 2; const binWidth = nyquist / (fftSize / 2); pitchMinIndex = Math.max(1, Math.floor(pitchMinFreq / binWidth)); pitchMaxIndex = Math.min(fftSize / 2 - 1, Math.ceil(pitchMaxFreq / binWidth)); if (audioContext.state === 'suspended') { await audioContext.resume(); } micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); microphone = audioContext.createMediaStreamSource(micStream); analyser = audioContext.createAnalyser(); analyser.fftSize = fftSize; analyser.smoothingTimeConstant = 0.75; frequencyData = new Uint8Array(analyser.frequencyBinCount); microphone.connect(analyser); console.log('Audio setup successful. Context state:', audioContext.state); audioReady = true; return true; } catch (err) { console.error('Audio Setup Error:', err); audioReady = false; isP5StateActive = false; if (micStream) micStream.getTracks().forEach(track => track.stop()); micStream = null; microphone = null; analyser = null; frequencyData = null; if (audioContext && audioContext.state !== 'closed') { await audioContext.close().catch(e => console.error("Error closing context on failure:", e)); } audioContext = null; return false; } };
+  /**
+   * Setup Audio Processing
+   * 
+   * Initializes or reconnects the Web Audio API components:
+   * - Creates AudioContext for processing audio input
+   * - Sets up microphone access with permission request
+   * - Configures the analyzer for frequency analysis
+   * - Handles error cases and state management
+   * 
+   * @returns {Promise<boolean>} Success or failure of the audio setup
+   */
+  const setupAudio = async () => { 
+    // Check if audio is already running, just reconnect mic if needed
+    if (audioContext && audioContext.state === 'running') { 
+      if (!micStream || !micStream.active) { 
+        try { 
+          // Request microphone access with noise suppression
+          micStream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { 
+              echoCancellation: true, 
+              noiseSuppression: true 
+            } 
+          }); 
+          
+          // Reconnect the microphone to the analyzer
+          if (microphone) microphone.disconnect(); 
+          microphone = audioContext.createMediaStreamSource(micStream); 
+          microphone.connect(analyser); 
+          console.log("Reconnected mic stream."); 
+        } catch (err) { 
+          console.error("Error reconnecting mic:", err); 
+          audioReady = false; 
+          isP5StateActive = false; 
+          return false; 
+        } 
+      } 
+      
+      audioReady = true; 
+      console.log("Audio already running or reconnected."); 
+      return true; 
+    } 
+    
+    // Close existing audio context if present
+    if (audioContext && audioContext.state !== 'closed') { 
+      console.log("Closing existing audio context before creating new one."); 
+      await audioContext.close().catch(e => console.error("Error closing previous context:", e)); 
+      audioContext = null; 
+    } 
+    
+    try { 
+      // Create a new audio context
+      audioContext = new (window.AudioContext || window.webkitAudioContext)(); 
+      
+      // Update sample rate and frequency calculation parameters
+      sampleRate = audioContext.sampleRate; 
+      nyquist = sampleRate / 2; 
+      const binWidth = nyquist / (fftSize / 2); 
+      pitchMinIndex = Math.max(1, Math.floor(pitchMinFreq / binWidth)); 
+      pitchMaxIndex = Math.min(fftSize / 2 - 1, Math.ceil(pitchMaxFreq / binWidth)); 
+      
+      // Resume context if it's suspended
+      if (audioContext.state === 'suspended') { 
+        await audioContext.resume(); 
+      } 
+      
+      // Request microphone access
+      micStream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { 
+          echoCancellation: true, 
+          noiseSuppression: true 
+        } 
+      }); 
+      
+      // Set up audio nodes
+      microphone = audioContext.createMediaStreamSource(micStream); 
+      analyser = audioContext.createAnalyser(); 
+      analyser.fftSize = fftSize; 
+      analyser.smoothingTimeConstant = 0.75; // Smoothing for transitions
+      frequencyData = new Uint8Array(analyser.frequencyBinCount); 
+      
+      // Connect microphone to analyzer
+      microphone.connect(analyser); 
+      
+      console.log('Audio setup successful. Context state:', audioContext.state); 
+      audioReady = true; 
+      return true; 
+    } catch (err) { 
+      // Handle setup errors
+      console.error('Audio Setup Error:', err); 
+      audioReady = false; 
+      isP5StateActive = false; 
+      
+      // Clean up any partial resources
+      if (micStream) { 
+        micStream.getTracks().forEach(track => track.stop()); 
+        micStream = null; 
+      } 
+      
+      microphone = null; 
+      analyser = null; 
+      frequencyData = null; 
+      
+      if (audioContext && audioContext.state !== 'closed') { 
+        await audioContext.close().catch(e => console.error("Error closing context on failure:", e)); 
+      } 
+      
+      audioContext = null; 
+      return false; 
+    } 
+  };
 
-  // --- Stop Audio Processing ---
-  const stopAudioProcessing = () => { console.log("Stopping audio processing and mic tracks."); if (micStream) { micStream.getTracks().forEach(track => track.stop()); micStream = null; } if (microphone) { microphone.disconnect(); microphone = null; } audioReady = false; const stopLerpFactor = audioLerpFactor * 4; smoothedOverallLevel=p.lerp(smoothedOverallLevel,0,stopLerpFactor); smoothedMidLevel=p.lerp(smoothedMidLevel,0,stopLerpFactor); smoothedTrebleLevel=p.lerp(smoothedTrebleLevel,0,stopLerpFactor); frequencySpread = p.lerp(frequencySpread, 0, stopLerpFactor); averageVolume = 0; volumeHistory = volumeHistory.map(() => 0); midHistory = midHistory.map(() => 0); sustainedMidLevel = 0; pitchProxy = 0.5; lastPitchProxy = 0.5; pitchChangeRate = 0; focusFactor=0; melodyFactor=0; emphasisFactor=0; /* Reset mode factors */};
+  /**
+   * Stop Audio Processing
+   * 
+   * Gracefully shuts down audio processing:
+   * - Stops all active microphone tracks
+   * - Disconnects audio nodes
+   * - Gradually fades out audio-related parameters
+   * - Resets all state variables to default values
+   */
+  const stopAudioProcessing = () => { 
+    console.log("Stopping audio processing and mic tracks."); 
+    
+    // Stop all microphone tracks
+    if (micStream) { 
+      micStream.getTracks().forEach(track => track.stop()); 
+      micStream = null; 
+    } 
+    
+    // Disconnect the microphone node
+    if (microphone) { 
+      microphone.disconnect(); 
+      microphone = null; 
+    } 
+    
+    // Mark audio as not ready
+    audioReady = false; 
+    
+    // Use a faster lerp factor for quicker fade-out
+    const stopLerpFactor = audioLerpFactor * 4; 
+    
+    // Gradually fade audio levels to zero
+    smoothedOverallLevel = p.lerp(smoothedOverallLevel, 0, stopLerpFactor); 
+    smoothedMidLevel = p.lerp(smoothedMidLevel, 0, stopLerpFactor); 
+    smoothedTrebleLevel = p.lerp(smoothedTrebleLevel, 0, stopLerpFactor); 
+    frequencySpread = p.lerp(frequencySpread, 0, stopLerpFactor); 
+    
+    // Reset all history arrays and derived values
+    averageVolume = 0; 
+    volumeHistory = volumeHistory.map(() => 0); 
+    midHistory = midHistory.map(() => 0); 
+    sustainedMidLevel = 0; 
+    
+    // Reset pitch tracking
+    pitchProxy = 0.5; 
+    lastPitchProxy = 0.5; 
+    pitchChangeRate = 0; 
+    
+    // Reset speech mode factors
+    focusFactor = 0; 
+    melodyFactor = 0; 
+    emphasisFactor = 0; 
+  };
 
   // --- Update Audio Analysis ---
   const updateAudio = () => { lastPitchProxy = pitchProxy; if (!isP5StateActive || !audioReady || !analyser || !frequencyData) { const idleLerpFactor = audioLerpFactor * 0.3; smoothedOverallLevel=p.lerp(smoothedOverallLevel,0,idleLerpFactor); smoothedMidLevel=p.lerp(smoothedMidLevel,0,idleLerpFactor); smoothedTrebleLevel=p.lerp(smoothedTrebleLevel,0,idleLerpFactor); frequencySpread = p.lerp(frequencySpread, 0, freqSpreadLerpFactor); volumeHistory.push(0); if(volumeHistory.length > volumeHistoryLength) volumeHistory.shift(); averageVolume = volumeHistory.reduce((a, b) => a + b, 0) / volumeHistory.length; midHistory.push(0); if(midHistory.length > midHistoryLength) midHistory.shift(); sustainedMidLevel = midHistory.reduce((a,b) => a+b, 0) / midHistory.length; pitchProxy = p.lerp(pitchProxy, 0.5, pitchProxyLerpFactor); pitchChangeRate = p.lerp(pitchChangeRate, 0, pitchChangeLerpFactor); return; } analyser.getByteFrequencyData(frequencyData); let oSum=0, mSum=0, tSum=0, activeBinCount = 0; const fbc=frequencyData.length; const midEndFreq=4000, trebleStartFreq=4000; const midEndIndex=Math.min(fbc-1,Math.ceil(midEndFreq/(nyquist/fbc))); const trebleStartIndex=Math.min(fbc-1,Math.floor(trebleStartFreq/(nyquist/fbc))); let maxAmp = 0; let peakIndex = -1; for (let i = pitchMinIndex; i <= pitchMaxIndex; i++) { if (frequencyData[i] > maxAmp) { maxAmp = frequencyData[i]; peakIndex = i; } } let targetPitchProxy = 0.5; if (peakIndex !== -1 && maxAmp > binActivationThreshold * 1.5) { targetPitchProxy = p.map(peakIndex, pitchMinIndex, pitchMaxIndex, 0, 1, true); } pitchProxy = p.lerp(pitchProxy, targetPitchProxy, pitchProxyLerpFactor); for(let i=0;i<fbc;i++){ let l=frequencyData[i]; oSum+=l; if(i<=midEndIndex) mSum+=l; else if(i>=trebleStartIndex) tSum+=l; if(l > binActivationThreshold) activeBinCount++; } let nO=fbc>0?oSum/fbc:0; let numMidBins = midEndIndex + 1; let numTrebleBins = fbc - trebleStartIndex; let nM=numMidBins>0?mSum/numMidBins:0; let nT=numTrebleBins>0?tSum/numTrebleBins:0; let normO=p.map(nO,0,160,0,1,true); let normM=p.map(nM,0,160,0,1,true); let normT=p.map(nT,0,160,0,1,true); smoothedOverallLevel = p.lerp(smoothedOverallLevel,normO,audioLerpFactor); smoothedMidLevel = p.lerp(smoothedMidLevel,normM,audioLerpFactor); smoothedTrebleLevel = p.lerp(smoothedTrebleLevel,normT,audioLerpFactor); let targetSpread = fbc > 0 ? activeBinCount / fbc : 0; frequencySpread = p.lerp(frequencySpread, targetSpread, freqSpreadLerpFactor); volumeHistory.push(smoothedOverallLevel); if(volumeHistory.length > volumeHistoryLength) volumeHistory.shift(); averageVolume = volumeHistory.reduce((a, b) => a + b, 0) / volumeHistory.length; midHistory.push(smoothedMidLevel); if(midHistory.length > midHistoryLength) midHistory.shift(); sustainedMidLevel = midHistory.reduce((a,b) => a+b, 0) / midHistory.length; let currentPitchChange = Math.abs(pitchProxy - lastPitchProxy); pitchChangeRate = p.lerp(pitchChangeRate, currentPitchChange, pitchChangeLerpFactor); if (!isAhaMoment && smoothedOverallLevel > ahaMinimumLevel && averageVolume > 0.01 && smoothedOverallLevel > averageVolume * ahaThresholdMultiplier) { isAhaMoment = true; ahaTimer = ahaDuration; flashIntensity = 1.0; console.log("Aha! Detected"); } };
@@ -573,7 +987,6 @@ const sketch = (p) => {
         p.curveVertex(vertices[i].x * glowSize, vertices[i].y * glowSize);
       }
       p.curveVertex(vertices[0].x * glowSize, vertices[0].y * glowSize);
-      p.curveVertex(vertices[1].x * glowSize, vertices[1].y * glowSize);
       p.endShape(p.CLOSE);
     }
     
@@ -602,7 +1015,6 @@ const sketch = (p) => {
         p.curveVertex(vertices[i].x * layerRadiusRatio, vertices[i].y * layerRadiusRatio);
       }
       p.curveVertex(vertices[0].x * layerRadiusRatio, vertices[0].y * layerRadiusRatio);
-      p.curveVertex(vertices[1].x * layerRadiusRatio, vertices[1].y * layerRadiusRatio);
       p.endShape(p.CLOSE);
     }
   };
@@ -678,33 +1090,55 @@ const sketch = (p) => {
   };
 };
 
-// --- React Component Definition ---
+/**
+ * AudioReactivePaintBlob React Component
+ * 
+ * A React component that renders an audio-reactive blob visualization.
+ * This component:
+ * - Creates and manages a p5.js canvas instance
+ * - Synchronizes the blob state with parent component props
+ * - Handles microphone activation/deactivation
+ * - Provides loading and error states
+ * 
+ * The component is designed to be simple to use - just pass an isActive prop
+ * to control when the blob should be active (reacting to audio).
+ * 
+ * @param {Object} props - Component props
+ * @param {boolean} props.isActive - Whether the microphone/blob should be active
+ */
 const AudioReactivePaintBlob = ({ isActive }) => {
-  const canvasContainerRef = useRef(null);
-  const p5InstanceRef = useRef(null);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
+  // Refs to hold references across renders
+  const canvasContainerRef = useRef(null); // Reference to the container div
+  const p5InstanceRef = useRef(null);      // Reference to the p5.js instance
   
-  // We're removing the internal microphoneActive state and relying solely on props
-  // This ensures perfect synchronization with the parent component's state
+  // Component state
+  const [errorMessage, setErrorMessage] = useState(''); // Error message to display
+  const [isLoading, setIsLoading] = useState(true);     // Loading state flag
   
-  // Remove direct canvas interaction - all control should come from parent component
-  // to maintain a single source of truth for microphone state
-  
-  // Effect to initialize p5.js and canvas
+  /**
+   * Initialize p5.js canvas
+   * 
+   * This effect runs once on component mount to:
+   * - Import the p5.js library dynamically
+   * - Create a new p5 instance with our sketch
+   * - Clean up resources when the component unmounts
+   */
   useEffect(() => { 
     let p5instance; 
-    let mounted = true;
+    let mounted = true; // Track component mount state
     
     // Initialize p5.js with a slight delay to ensure DOM is fully ready
     const timer = setTimeout(() => {
       if (!mounted) return;
       
+      // Dynamically import p5.js to reduce initial bundle size
       import('p5').then(p5 => { 
-        if (!mounted) return;
+        if (!mounted) return; // Check mount state again after async operation
         
+        // Create new p5 instance if container exists and we don't already have one
         if (canvasContainerRef.current && !p5InstanceRef.current) { 
           try {
+            // Initialize p5 with our sketch and container
             p5instance = new p5.default(sketch, canvasContainerRef.current); 
             p5InstanceRef.current = p5instance; 
             console.log("React: p5 instance created successfully"); 
@@ -732,45 +1166,56 @@ const AudioReactivePaintBlob = ({ isActive }) => {
       }); 
     }, 50); // Short delay to ensure DOM is ready
     
+    // Cleanup function runs when component unmounts
     return () => { 
-      mounted = false;
-      clearTimeout(timer);
+      mounted = false; // Mark component as unmounted
+      clearTimeout(timer); // Clear the initialization timer
+      
+      // Clean up p5 instance if it exists
       if (p5InstanceRef.current) { 
         console.log("React: Cleaning up p5 instance."); 
         try {
-          p5InstanceRef.current.cleanup(); 
+          p5InstanceRef.current.cleanup(); // Call p5 cleanup method
         } catch (e) {
           console.error("Error during cleanup:", e);
         }
-        p5InstanceRef.current = null; 
+        p5InstanceRef.current = null; // Clear the reference
       } 
     }; 
-  }, []);
+  }, []); // Empty dependency array - only run on mount/unmount
 
-  // Effect to synchronize blob state with isActive prop
+  /**
+   * Synchronize blob state with isActive prop
+   * 
+   * This effect runs whenever the isActive prop changes to:
+   * - Activate or deactivate the p5 audio processing
+   * - Handle errors during state transitions
+   * - Clean up resources when deactivating
+   */
   useEffect(() => {
-    // Use a ref to track the current p5 instance state
-    // This prevents race conditions during the component lifecycle
+    // Get the current p5 instance from ref
     const p5Instance = p5InstanceRef.current;
     
-    // Early return if no p5 instance
+    // Early return if no p5 instance exists yet
     if (!p5Instance) return;
 
-    // Use a flag to avoid double-activations
+    // Flag to prevent multiple simultaneous state changes
     let isHandlingStateChange = false;
     
-    // This function synchronizes the p5 instance state with props
+    /**
+     * Synchronize the p5 instance state with component props
+     */
     const syncState = async () => {
-      if (isHandlingStateChange) return;
+      if (isHandlingStateChange) return; // Prevent concurrent state changes
       
       try {
         isHandlingStateChange = true;
         console.log("AudioReactiveBlob: Sync state called, isActive:", isActive);
         
-        // isActive here refers to whether the microphone should be active
+        // Control the p5 instance based on isActive prop
         if (isActive) {
           console.log("AudioReactiveBlob: Activating p5 audio for visualization");
-          // We don't await this call to ensure UI updates immediately
+          // Don't await this call to ensure UI updates immediately
           p5Instance.activate();
         } else {
           console.log("AudioReactiveBlob: Deactivating p5 audio");
@@ -787,10 +1232,10 @@ const AudioReactivePaintBlob = ({ isActive }) => {
       }
     };
     
-    // Run synchronization
+    // Run the sync state function
     syncState();
     
-    // Ensure cleanup on unmount or when isActive changes
+    // Cleanup function runs when component unmounts or isActive changes
     return () => {
       if (p5Instance) {
         console.log("AudioReactiveBlob: Cleaning up on state change or unmount");
@@ -800,13 +1245,28 @@ const AudioReactivePaintBlob = ({ isActive }) => {
         }
       }
     };
-  }, [isActive]); // Only depend on isActive to prevent loops
-  // Status indicators for accessibility and visual feedback
+  }, [isActive]); // Depend only on isActive prop
+
+  /**
+   * Render the status indicator (currently returns null)
+   * 
+   * This could be expanded in the future to show more status information
+   * or accessibility indicators.
+   */
   const renderStatusIndicator = () => {
     // No visual indicator needed
     return null;
   };
 
+  /**
+   * Component render function
+   * 
+   * Renders:
+   * - A container div for the p5.js canvas
+   * - Loading indicator during initialization
+   * - Error message if something goes wrong
+   * - CSS animations for visual effects
+   */
   return ( 
     <div id="canvas-container" 
       ref={canvasContainerRef}
@@ -822,6 +1282,7 @@ const AudioReactivePaintBlob = ({ isActive }) => {
     >
       {renderStatusIndicator()}
       
+      {/* Loading indicator */}
       {isLoading && 
         <div style={{
           position: 'absolute',
@@ -839,6 +1300,7 @@ const AudioReactivePaintBlob = ({ isActive }) => {
         </div>
       } 
       
+      {/* Error message display */}
       {errorMessage && ( 
         <div style={{ 
           position: 'absolute', 
@@ -857,7 +1319,7 @@ const AudioReactivePaintBlob = ({ isActive }) => {
         </div> 
       )} 
       
-      {/* Add a hidden style tag for animations */}
+      {/* CSS animations for visual effects */}
       <style dangerouslySetInnerHTML={{
         __html: `
           @keyframes pulse {
@@ -871,4 +1333,10 @@ const AudioReactivePaintBlob = ({ isActive }) => {
   );
 };
 
-export default AudioReactivePaintBlob; // Export the component
+/**
+ * Export the AudioReactivePaintBlob component as the default export
+ * 
+ * This component can be imported and used in other components like:
+ * import AudioReactivePaintBlob from './AudioReactiveBlob';
+ */
+export default AudioReactivePaintBlob;
