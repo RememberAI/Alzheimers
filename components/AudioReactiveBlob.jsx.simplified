@@ -1,0 +1,591 @@
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { Box } from '@mui/material';
+
+// AudioReactiveBlob Component - Simplified and Error-Resistant Version
+const AudioReactiveBlob = ({ isActive = false, isTransitioning = false }) => {
+  const canvasContainerRef = useRef(null);
+  const p5InstanceRef = useRef(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  // Initialize p5.js
+  useEffect(() => {
+    let mounted = true;
+    let p5Instance;
+
+    const initializeP5 = async () => {
+      try {
+        // Dynamically import p5.js
+        const p5Module = await import('p5');
+        const p5 = p5Module.default;
+        
+        if (!mounted || !canvasContainerRef.current) return;
+        
+        // Define p5 sketch with error handling
+        const sketch = (p) => {
+          // --- Core Configuration ---
+          const fftSize = 1024;
+          const numVertices = 140;
+          const baseRadiusRatio = 5.0;
+          
+          // --- Audio Analysis ---
+          let audioContext;
+          let analyser;
+          let microphone;
+          let micStream;
+          let frequencyData;
+          let audioReady = false;
+          
+          // --- State Management ---
+          let isP5Active = false;
+          let activeIntensity = 0;
+          const activeIntensitySpeed = 0.07;
+          
+          // --- Blob Properties ---
+          let baseRadius = 100;
+          let vertices = [];
+          
+          // --- Visual Properties ---
+          // Color settings - blue when active, gray when inactive
+          const activeColor = { h: 210, s: 60, b: 95 }; // Blue
+          const inactiveColor = { h: 0, s: 0, b: 85 };  // Gray
+          let currentColor = { ...inactiveColor };
+          
+          // Spectrum visualization
+          const spectrumBands = 32;
+          let spectrumValues = Array(spectrumBands).fill(0);
+          
+          // Audio levels
+          let smoothedLevel = 0;
+          
+          // --- Setup Function ---
+          p.setup = () => {
+            try {
+              const container = document.getElementById('canvas-container');
+              if (!container) {
+                console.error("Canvas container not found");
+                return;
+              }
+              
+              // Create canvas with integer dimensions
+              const canvasWidth = Math.floor(container.offsetWidth);
+              const canvasHeight = Math.floor(container.offsetHeight);
+              
+              // Create canvas
+              const canvas = p.createCanvas(canvasWidth, canvasHeight);
+              canvas.parent('canvas-container');
+              
+              // Configure p5
+              p.colorMode(p.HSB, 360, 100, 100, 100);
+              p.angleMode(p.RADIANS);
+              p.frameRate(60);
+              
+              // Initialize blob size based on canvas dimensions
+              baseRadius = p.min(p.width, p.height) / baseRadiusRatio;
+              
+              // Initialize vertices array
+              for (let i = 0; i < numVertices; i++) {
+                vertices.push(p.createVector(0, 0));
+              }
+              
+              // Initial calculations
+              updateColor();
+              calculateBlobShape();
+              
+              // Initial background
+              p.clear();
+              p.background(240);
+              
+              console.log(`p5 Setup Complete. Canvas: ${p.width}x${p.height}, BaseRadius: ${baseRadius}`);
+            } catch (err) {
+              console.error("Error in p5 setup:", err);
+            }
+          };
+          
+          // --- Draw Loop ---
+          p.draw = () => {
+            try {
+              // Clear canvas and set background
+              p.clear();
+              p.background(240);
+              
+              // Center the drawing
+              p.push();
+              const centerX = Math.floor(p.width / 2);
+              const centerY = Math.floor(p.height / 2);
+              p.translate(centerX, centerY);
+              
+              // Update all aspects of the visualization
+              updateAudio();
+              updateState();
+              updateColor();
+              calculateBlobShape();
+              drawBlob();
+              
+              p.pop();
+            } catch (err) {
+              console.error("Error in p5 draw:", err);
+            }
+          };
+          
+          // --- Audio Setup ---
+          const setupAudio = async () => {
+            try {
+              // Close any existing audio context
+              if (audioContext && audioContext.state !== 'closed') {
+                await audioContext.close().catch(e => console.error("Error closing context:", e));
+                audioContext = null;
+              }
+              
+              // Create new audio context
+              audioContext = new (window.AudioContext || window.webkitAudioContext)();
+              
+              // Resume audio context if needed
+              if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+              }
+              
+              // Request microphone access
+              micStream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true }
+              });
+              
+              // Set up audio analyzer
+              microphone = audioContext.createMediaStreamSource(micStream);
+              analyser = audioContext.createAnalyser();
+              analyser.fftSize = fftSize;
+              analyser.smoothingTimeConstant = 0.75;
+              frequencyData = new Uint8Array(analyser.frequencyBinCount);
+              microphone.connect(analyser);
+              
+              console.log('Audio setup successful');
+              audioReady = true;
+              return true;
+            } catch (err) {
+              console.error('Audio Setup Error:', err);
+              cleanupAudio();
+              return false;
+            }
+          };
+          
+          // --- Cleanup Audio ---
+          const cleanupAudio = () => {
+            // Stop microphone tracks
+            if (micStream) {
+              micStream.getTracks().forEach(track => track.stop());
+              micStream = null;
+            }
+            
+            // Disconnect microphone
+            if (microphone) {
+              microphone.disconnect();
+              microphone = null;
+            }
+            
+            // Reset audio data
+            audioReady = false;
+            smoothedLevel = 0;
+            spectrumValues = spectrumValues.map(() => 0);
+          };
+          
+          // --- Update Audio Analysis ---
+          const updateAudio = () => {
+            // If inactive or audio not ready, fade out values
+            if (!isP5Active || !audioReady || !analyser || !frequencyData) {
+              // Gradually fade spectrum values
+              for (let i = 0; i < spectrumBands; i++) {
+                spectrumValues[i] = p.lerp(spectrumValues[i], 0, 0.3);
+              }
+              
+              // Fade out overall level
+              smoothedLevel = p.lerp(smoothedLevel, 0, 0.1);
+              return;
+            }
+            
+            // Get frequency data
+            analyser.getByteFrequencyData(frequencyData);
+            
+            // Process frequency data for spectrum bands
+            const bandWidth = Math.floor(frequencyData.length / spectrumBands);
+            let newSpectrumValues = [];
+            
+            for (let i = 0; i < spectrumBands; i++) {
+              const startIndex = i * bandWidth;
+              const endIndex = Math.min(startIndex + bandWidth, frequencyData.length);
+              let sum = 0;
+              
+              // Calculate average value for this band
+              for (let j = startIndex; j < endIndex; j++) {
+                sum += frequencyData[j];
+              }
+              
+              // Normalize band value to 0-1 range
+              const avgValue = sum / (endIndex - startIndex);
+              const normalizedValue = p.map(avgValue, 0, 255, 0, 1, true);
+              
+              // Apply frequency scaling (lower impact for higher frequencies)
+              const bandPosition = i / spectrumBands;
+              const frequencyScaling = p.map(bandPosition, 0, 1, 1.0, 0.5, true);
+              
+              // Store scaled value
+              newSpectrumValues[i] = normalizedValue * frequencyScaling;
+            }
+            
+            // Smooth transitions between spectrum values
+            for (let i = 0; i < spectrumBands; i++) {
+              const smoothingFactor = isP5Active ? 0.3 : 0.5;
+              spectrumValues[i] = p.lerp(spectrumValues[i], newSpectrumValues[i], smoothingFactor);
+            }
+            
+            // Calculate overall audio level
+            let sum = 0;
+            for (let i = 0; i < frequencyData.length; i++) {
+              sum += frequencyData[i];
+            }
+            
+            // Normalize and smooth overall level
+            const normalizedLevel = p.map(sum / frequencyData.length, 0, 160, 0, 1, true);
+            smoothedLevel = p.lerp(smoothedLevel, normalizedLevel, 0.1);
+          };
+          
+          // --- Update State ---
+          const updateState = () => {
+            // Smoothly transition active intensity
+            const targetIntensity = isP5Active ? 1.0 : 0.0;
+            activeIntensity = p.lerp(activeIntensity, targetIntensity, activeIntensitySpeed);
+          };
+          
+          // --- Update Color ---
+          const updateColor = () => {
+            // Determine target color based on active state
+            const targetColor = isP5Active ? activeColor : inactiveColor;
+            
+            // Smooth transition between colors
+            const transitionSpeed = 0.01;
+            
+            currentColor.h = p.lerp(currentColor.h, targetColor.h, transitionSpeed);
+            currentColor.s = p.lerp(currentColor.s, targetColor.s, transitionSpeed);
+            currentColor.b = p.lerp(currentColor.b, targetColor.b, transitionSpeed);
+            
+            // Handle hue wrapping
+            if (currentColor.h < 0) currentColor.h += 360;
+            if (currentColor.h > 360) currentColor.h -= 360;
+          };
+          
+          // --- Calculate Blob Shape ---
+          const calculateBlobShape = () => {
+            // Time-based animation
+            const noiseTime = p.millis() * 0.0004;
+            
+            // Volume influence on deformation
+            const deformAmount = 0.04 + (isP5Active ? smoothedLevel * 0.03 : 0);
+            
+            // Calculate vertices
+            for (let i = 0; i < numVertices; i++) {
+              const angle = p.map(i, 0, numVertices, 0, p.TWO_PI);
+              
+              // Base noise position
+              const noiseX = p.cos(angle) * 0.7;
+              const noiseY = p.sin(angle) * 0.7;
+              
+              // Get noise value
+              const noiseVal = p.noise(noiseX, noiseY, noiseTime);
+              
+              // Calculate radius with noise deformation
+              const offset = p.map(noiseVal, 0, 1, -deformAmount, deformAmount) * baseRadius;
+              const radius = baseRadius + offset;
+              
+              // Apply audio reactivity when active
+              let finalRadius = radius;
+              if (isP5Active && smoothedLevel > 0.1) {
+                // Find corresponding spectrum band
+                const bandIndex = Math.floor((i / numVertices) * spectrumBands) % spectrumBands;
+                const nextBandIndex = (bandIndex + 1) % spectrumBands;
+                
+                // Interpolate between bands for smoother transition
+                const bandPosition = (i / numVertices) * spectrumBands - bandIndex;
+                const spectrumValue = p.lerp(
+                  spectrumValues[bandIndex],
+                  spectrumValues[nextBandIndex],
+                  bandPosition
+                );
+                
+                // Apply spectrum influence to radius
+                const spectrumInfluence = 0.08 * baseRadius * activeIntensity;
+                finalRadius += spectrumValue * spectrumInfluence;
+              }
+              
+              // Set vertex position
+              vertices[i].x = finalRadius * p.cos(angle);
+              vertices[i].y = finalRadius * p.sin(angle);
+            }
+          };
+          
+          // --- Draw Blob ---
+          const drawBlob = () => {
+            // Draw EQ visualization edge when active
+            if (isP5Active && activeIntensity > 0.1) {
+              p.push();
+              p.noFill();
+              
+              // Edge color
+              const edgeColor = p.color(
+                currentColor.h,
+                Math.min(currentColor.s + 20, 100),
+                Math.min(currentColor.b + 5, 100),
+                40 + (smoothedLevel * 30)
+              );
+              
+              p.stroke(edgeColor);
+              p.strokeWeight(2);
+              
+              // Draw spectrum edge
+              p.beginShape();
+              
+              // Add first point as control point
+              const lastIndex = numVertices - 1;
+              p.curveVertex(vertices[lastIndex].x * 1.05, vertices[lastIndex].y * 1.05);
+              
+              // Add all points
+              for (let i = 0; i < numVertices; i++) {
+                p.curveVertex(vertices[i].x * 1.05, vertices[i].y * 1.05);
+              }
+              
+              // Add closing control points
+              p.curveVertex(vertices[0].x * 1.05, vertices[0].y * 1.05);
+              p.curveVertex(vertices[1].x * 1.05, vertices[1].y * 1.05);
+              
+              p.endShape(p.CLOSE);
+              p.pop();
+            }
+            
+            // Draw main blob
+            p.push();
+            
+            // Blob color
+            const blobColor = p.color(currentColor.h, currentColor.s, currentColor.b, 95);
+            
+            p.fill(blobColor);
+            p.noStroke();
+            
+            p.beginShape();
+            
+            // Add first point as control point
+            p.curveVertex(vertices[numVertices - 1].x, vertices[numVertices - 1].y);
+            
+            // Add all points
+            for (let i = 0; i < numVertices; i++) {
+              p.curveVertex(vertices[i].x, vertices[i].y);
+            }
+            
+            // Add closing control points
+            p.curveVertex(vertices[0].x, vertices[0].y);
+            p.curveVertex(vertices[1].x, vertices[1].y);
+            
+            p.endShape(p.CLOSE);
+            p.pop();
+          };
+          
+          // --- External Control Methods ---
+          
+          // Activate blob (turn blue, start audio)
+          p.activate = async () => {
+            try {
+              console.log("Activating blob");
+              const success = await setupAudio();
+              isP5Active = true;
+              return success;
+            } catch (err) {
+              console.error("Error activating blob:", err);
+              return false;
+            }
+          };
+          
+          // Deactivate blob (turn gray, stop audio)
+          p.deactivate = () => {
+            try {
+              console.log("Deactivating blob");
+              cleanupAudio();
+              isP5Active = false;
+            } catch (err) {
+              console.error("Error deactivating blob:", err);
+            }
+          };
+          
+          // Cleanup all resources
+          p.cleanup = () => {
+            try {
+              console.log("Cleaning up p5 instance");
+              cleanupAudio();
+              
+              if (audioContext && audioContext.state !== 'closed') {
+                audioContext.close()
+                  .then(() => console.log("AudioContext closed"))
+                  .catch(e => console.error("Error closing AudioContext:", e));
+              }
+              
+              p.remove();
+            } catch (err) {
+              console.error("Error during p5 cleanup:", err);
+            }
+          };
+          
+          // Handle window resize
+          p.windowResized = () => {
+            try {
+              const container = document.getElementById('canvas-container');
+              if (!container) return;
+              
+              const width = Math.floor(container.offsetWidth);
+              const height = Math.floor(container.offsetHeight);
+              
+              p.resizeCanvas(width, height);
+              baseRadius = p.min(p.width, p.height) / baseRadiusRatio;
+            } catch (err) {
+              console.error("Error during resize:", err);
+            }
+          };
+        };
+        
+        // Create p5 instance
+        p5Instance = new p5(sketch, canvasContainerRef.current);
+        p5InstanceRef.current = p5Instance;
+        
+        // Update loading state after a short delay
+        setTimeout(() => {
+          if (mounted) {
+            setIsLoading(false);
+          }
+        }, 200);
+        
+      } catch (err) {
+        console.error("Error initializing p5:", err);
+        if (mounted) {
+          setErrorMessage("Failed to initialize visualization");
+          setIsLoading(false);
+        }
+      }
+    };
+    
+    // Initialize with a slight delay to ensure DOM is ready
+    const timer = setTimeout(initializeP5, 50);
+    
+    // Cleanup function
+    return () => {
+      mounted = false;
+      clearTimeout(timer);
+      
+      if (p5InstanceRef.current) {
+        try {
+          p5InstanceRef.current.cleanup();
+        } catch (e) {
+          console.error("Error during cleanup:", e);
+        }
+        p5InstanceRef.current = null;
+      }
+    };
+  }, []);
+  
+  // Effect to handle isActive prop changes
+  useEffect(() => {
+    if (!p5InstanceRef.current) return;
+    
+    try {
+      if (isActive) {
+        if (p5InstanceRef.current.activate) {
+          p5InstanceRef.current.activate();
+        }
+      } else {
+        if (p5InstanceRef.current.deactivate) {
+          p5InstanceRef.current.deactivate();
+        }
+      }
+    } catch (err) {
+      console.error("Error updating blob state:", err);
+    }
+  }, [isActive]);
+  
+  // Handle canvas clicks to toggle blob state
+  const handleCanvasClick = useCallback(async () => {
+    if (!p5InstanceRef.current) return;
+    
+    setErrorMessage('');
+    
+    try {
+      if (isActive) {
+        // User wants to deactivate
+        if (p5InstanceRef.current.deactivate) {
+          p5InstanceRef.current.deactivate();
+        }
+      } else {
+        // User wants to activate
+        if (p5InstanceRef.current.activate) {
+          const success = await p5InstanceRef.current.activate();
+          
+          if (!success) {
+            setErrorMessage("Could not access microphone. Please check browser permissions.");
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error handling canvas click:", err);
+      setErrorMessage("An error occurred while toggling the microphone.");
+    }
+  }, [isActive]);
+  
+  return (
+    <div
+      id="canvas-container"
+      ref={canvasContainerRef}
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'pointer',
+        position: 'relative',
+        overflow: 'hidden',
+        backgroundColor: 'transparent'
+      }}
+      onClick={handleCanvasClick}
+    >
+      {isLoading && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 5,
+          backgroundColor: '#f8f8f8'
+        }}>
+          <span style={{color: '#757575', fontSize: '1rem'}}>Loading Visualizer...</span>
+        </div>
+      )}
+      
+      {errorMessage && (
+        <div style={{
+          position: 'absolute',
+          bottom: 16,
+          left: 16,
+          right: 16,
+          color: '#d32f2f',
+          textAlign: 'center',
+          backgroundColor: 'rgba(255, 235, 238, 0.9)',
+          padding: '4px 8px',
+          borderRadius: '4px',
+          fontSize: '0.875rem',
+          zIndex: 10
+        }}>
+          {errorMessage}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AudioReactiveBlob;
